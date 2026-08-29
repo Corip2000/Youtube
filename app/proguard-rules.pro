@@ -1,0 +1,3 @@
+-keep class com.yausername.** { *; }
+-keep class net.openid.appauth.** { *; }
+-dontwarn org.slf4j.**
