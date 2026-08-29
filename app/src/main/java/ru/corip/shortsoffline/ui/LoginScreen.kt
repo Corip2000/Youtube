@@ -5,6 +5,8 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -21,24 +23,38 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * Обычный вход на youtube.com в WebView. Куки забираются, когда пользователь
- * нажимает «Готово» — отдельного OAuth-клиента и ключей не требуется.
+ * Два пути получить сессию YouTube.
  *
- * Google иногда отказывает WebView со словами «этот браузер небезопасен».
- * Поэтому подменяем User-Agent на десктопный Chrome; если всё равно не пускает,
- * остаётся импорт cookies.txt из браузера на компьютере.
+ * 1. Вход прямо здесь, в WebView. Google часто отказывает такому окну
+ *    («этот браузер небезопасен») — обойти это со стороны приложения нельзя.
+ * 2. Импорт cookies.txt, выгруженного из настоящего браузера. Работает всегда,
+ *    потому что куки приходят из сессии, которую Google сам и одобрил.
  */
-private const val DESKTOP_UA =
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-        "Chrome/122.0.0.0 Safari/537.36"
+private const val UA =
+    "Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0"
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LoginScreen(onDone: () -> Unit) {
+fun LoginScreen(onDone: () -> Unit, onImport: (String) -> Unit) {
+    val context = LocalContext.current
+
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)
+                    ?.bufferedReader()?.use { it.readText() }
+            }.getOrNull()
+            if (text != null) onImport(text)
+        }
+    }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -62,6 +78,19 @@ fun LoginScreen(onDone: () -> Unit) {
                 modifier = Modifier.clickable { onDone() },
             )
         }
+
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 12.dp)
+        ) {
+            AppButton(
+                "Импорт cookies.txt",
+                tail = "если вход не пускает",
+            ) { picker.launch(arrayOf("*/*")) }
+        }
+
         Box(
             Modifier
                 .fillMaxWidth()
@@ -71,16 +100,16 @@ fun LoginScreen(onDone: () -> Unit) {
         Spacer(Modifier.height(2.dp))
 
         AndroidView(
-            factory = { context ->
+            factory = { ctx ->
                 CookieManager.getInstance().setAcceptCookie(true)
-                WebView(context).apply {
+                WebView(ctx).apply {
                     CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
-                    settings.userAgentString = DESKTOP_UA
+                    settings.userAgentString = UA
                     webViewClient = WebViewClient()
                     webChromeClient = WebChromeClient()
-                    loadUrl("https://accounts.google.com/ServiceLogin?service=youtube")
+                    loadUrl("https://m.youtube.com/")
                 }
             },
             modifier = Modifier.fillMaxSize(),

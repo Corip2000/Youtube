@@ -61,7 +61,10 @@ private fun App(vm: AppViewModel = viewModel()) {
     ) {
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
-            Screen.LOGIN -> LoginScreen(onDone = { vm.finishLogin() })
+            Screen.LOGIN -> LoginScreen(
+                onDone = { vm.finishLogin() },
+                onImport = { vm.importCookies(it) },
+            )
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
             Screen.PLAYER -> PlayerScreen(state, vm)
         }
