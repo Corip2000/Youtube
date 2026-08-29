@@ -42,13 +42,12 @@ import androidx.compose.ui.unit.sp
 import ru.corip.shortsoffline.AppViewModel
 import ru.corip.shortsoffline.JobState
 import ru.corip.shortsoffline.Screen
-import ru.corip.shortsoffline.SourceMode
 import ru.corip.shortsoffline.UiState
+import ru.corip.shortsoffline.YtDlp
 import ru.corip.shortsoffline.formatBytes
 
 @Composable
-fun MenuScreen(state: UiState, vm: AppViewModel, onSignIn: () -> Unit) {
-    var settingsOpen by remember { mutableStateOf(false) }
+fun MenuScreen(state: UiState, vm: AppViewModel) {
     var confirmClear by remember { mutableStateOf(false) }
 
     Column(
@@ -84,7 +83,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel, onSignIn: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        state.accountName?.take(1)?.uppercase() ?: "?",
+                        if (state.signedIn) "\u25B6" else "?",
                         style = Type.Data.copy(
                             fontWeight = FontWeight.Bold,
                             color = if (state.signedIn) Color(0xFF180A10) else Palette.Ink,
@@ -93,29 +92,22 @@ fun MenuScreen(state: UiState, vm: AppViewModel, onSignIn: () -> Unit) {
                 }
                 Column(Modifier.padding(start = 12.dp)) {
                     Text(
-                        state.accountName ?: if (state.apiKey.isNotBlank()) "Работа по API-ключу"
-                        else "Ничего не настроено",
+                        if (state.signedIn) "YouTube подключён" else "Вход не выполнен",
                         style = Type.Data.copy(fontWeight = FontWeight.SemiBold),
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        when {
-                            state.signedIn -> "Google подключён · доступны подписки"
-                            state.apiKey.isNotBlank() -> "Только случайные шортсы"
-                            else -> "Нужен API-ключ или вход"
-                        },
+                        if (state.signedIn) "Твои ленты доступны"
+                        else "Без входа только «В тренде»",
                         style = Type.Label,
                     )
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (state.signedIn) {
-                    AppButton("Выйти", Modifier.weight(1f)) { vm.signOut() }
-                } else {
-                    AppButton("Войти в Google", Modifier.weight(1f), onClick = onSignIn)
-                }
-                AppButton("Ключи", Modifier.weight(1f)) { settingsOpen = true }
+            if (state.signedIn) {
+                AppButton("Выйти и стереть сессию") { vm.signOut() }
+            } else {
+                AppButton("Войти в YouTube", primary = true) { vm.openLogin() }
             }
         }
 
@@ -177,10 +169,6 @@ fun MenuScreen(state: UiState, vm: AppViewModel, onSignIn: () -> Unit) {
         }
     }
 
-    if (settingsOpen) {
-        KeysDialog(state, vm) { settingsOpen = false }
-    }
-
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
@@ -211,66 +199,6 @@ fun MenuScreen(state: UiState, vm: AppViewModel, onSignIn: () -> Unit) {
     }
 }
 
-@Composable
-private fun KeysDialog(state: UiState, vm: AppViewModel, onClose: () -> Unit) {
-    var key by remember { mutableStateOf(state.apiKey) }
-    var client by remember { mutableStateOf(state.clientId) }
-
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = Palette.Panel,
-        title = { Text("Ключи Google Cloud", style = Type.Data) },
-        text = {
-            Column {
-                Text(
-                    "API-ключ хватает для случайных шортсов и комментов. " +
-                        "OAuth client ID нужен только ради подписок.",
-                    style = Type.Small,
-                )
-                Spacer(Modifier.height(14.dp))
-                DarkField(key, "API key", { key = it })
-                Spacer(Modifier.height(10.dp))
-                DarkField(client, "OAuth client ID (Android)", { client = it })
-            }
-        },
-        confirmButton = {
-            Text(
-                "Сохранить",
-                style = Type.Data.copy(color = Palette.Signal),
-                modifier = Modifier.clickable {
-                    vm.setApiKey(key); vm.setClientId(client); onClose()
-                },
-            )
-        },
-        dismissButton = {
-            Text(
-                "Закрыть",
-                style = Type.Data.copy(color = Palette.Muted),
-                modifier = Modifier.clickable(onClick = onClose),
-            )
-        },
-    )
-}
-
-@Composable
-private fun DarkField(value: String, label: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label, style = Type.Label) },
-        singleLine = true,
-        textStyle = Type.Data,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = Palette.Sink,
-            unfocusedContainerColor = Palette.Sink,
-            focusedIndicatorColor = Palette.Signal,
-            unfocusedIndicatorColor = Palette.Edge,
-            cursorColor = Palette.Signal,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
 // ---------------------------------------------------------------- загрузка
 
 @Composable
@@ -296,19 +224,17 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
         Spacer(Modifier.height(20.dp))
 
         Panel {
-            Text("ИСТОЧНИК", style = Type.Label)
+            Text("ЛЕНТА", style = Type.Label)
             Spacer(Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SegButton("Случайные", state.mode == SourceMode.RANDOM, Modifier.weight(1f)) {
-                    vm.setMode(SourceMode.RANDOM)
+            YtDlp.Feed.entries.forEach { feed ->
+                val locked = feed.needsLogin && !state.signedIn
+                Box(Modifier.padding(bottom = 8.dp)) {
+                    SegButton(
+                        label = feed.title + if (locked) "  \u00B7 нужен вход" else "",
+                        active = state.feed == feed,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { vm.setFeed(feed) }
                 }
-                SegButton("Мои подписки", state.mode == SourceMode.SUBS, Modifier.weight(1f)) {
-                    vm.setMode(SourceMode.SUBS)
-                }
-            }
-            if (state.mode == SourceMode.SUBS && !state.signedIn) {
-                Spacer(Modifier.height(10.dp))
-                Text("Для подписок нужен вход в Google.", style = Type.Small.copy(color = Palette.Signal))
             }
         }
 

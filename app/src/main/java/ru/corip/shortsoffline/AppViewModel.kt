@@ -1,7 +1,6 @@
 package ru.corip.shortsoffline
 
 import android.app.Application
-import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -14,33 +13,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, DOWNLOAD, PLAYER }
-enum class SourceMode { RANDOM, SUBS }
+enum class Screen { MENU, LOGIN, DOWNLOAD, PLAYER }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
     val screen: Screen = Screen.MENU,
-    val busy: Boolean = false,
 
-    // аккаунт
     val signedIn: Boolean = false,
-    val accountName: String? = null,
-    val apiKey: String = "",
-    val clientId: String = "",
 
-    // хранилище
     val savedCount: Int = 0,
     val savedBytes: Long = 0,
     val freeSpace: Long = 0,
     val lifetime: Lifetime = Lifetime(0, 0, 0),
 
-    // сеанс просмотра
     val sessionDeleted: Int = 0,
     val sessionFreed: Long = 0,
     val showReceipt: Boolean = false,
 
-    // загрузка
-    val mode: SourceMode = SourceMode.RANDOM,
+    val feed: YtDlp.Feed = YtDlp.Feed.RECOMMENDED,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
     val jobMessage: String = "",
@@ -55,7 +45,6 @@ data class UiState(
     val currentProgress: Float = 0f,
     val skipped: Int = 0,
 
-    // плеер
     val queue: List<Saved> = emptyList(),
     val index: Int = 0,
     val comments: List<Comment> = emptyList(),
@@ -69,11 +58,6 @@ data class UiState(
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val store = Store(app)
-    private val auth = Auth(app, store)
-
-    @Volatile private var token: String? = null
-
-    private val api = YouTubeApi(apiKey = { store.apiKey }, accessToken = { token })
 
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -81,65 +65,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var jobHandle: Job? = null
     private val watched = mutableSetOf<String>()
 
+    /** Файл с куками, если вход выполнен. */
+    private fun cookies(): File? =
+        Cookies.file(getApplication()).takeIf { Cookies.isSignedIn(getApplication()) }
+
     init {
-        _state.update {
-            it.copy(apiKey = store.apiKey, clientId = store.clientId, signedIn = auth.isSignedIn)
-        }
+        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
+        _state.update { it.copy(feed = saved, signedIn = Cookies.isSignedIn(app)) }
         refreshStorage()
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { runCatching { Downloader.init(getApplication()) } }
-            if (auth.isSignedIn) refreshToken()
+            withContext(Dispatchers.IO) { runCatching { YtDlp.init(getApplication()) } }
         }
     }
 
-    // ------------------------------------------------------------- аккаунт
+    // ------------------------------------------------------------ вход
 
-    private suspend fun refreshToken() {
-        token = auth.accessToken()
-        val name = if (token != null) api.me() else null
-        _state.update { it.copy(signedIn = token != null, accountName = name) }
-    }
+    fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }
 
-    fun authIntent(): Intent? = runCatching { auth.buildIntent() }.getOrElse {
-        _state.update { s -> s.copy(toast = it.message) }
-        null
-    }
-
-    fun onAuthResult(data: Intent?) = viewModelScope.launch {
-        val result = auth.handleResult(data)
-        result.onFailure { e -> _state.update { it.copy(toast = e.message) } }
-        refreshToken()
+    /** Вызывается, когда пользователь закрывает окно входа. */
+    fun finishLogin() {
+        val saved = Cookies.captureFromWebView(getApplication())
+        val ok = Cookies.isSignedIn(getApplication())
+        _state.update {
+            it.copy(
+                screen = Screen.MENU,
+                signedIn = ok,
+                toast = if (ok) "Вход выполнен, сохранено $saved куки"
+                else "Сессия не найдена — похоже, вход не завершён",
+            )
+        }
     }
 
     fun signOut() {
-        auth.signOut()
-        token = null
-        _state.update { it.copy(signedIn = false, accountName = null) }
+        Cookies.signOut(getApplication())
+        _state.update { it.copy(signedIn = false, toast = "Сессия удалена") }
     }
 
-    fun setApiKey(value: String) {
-        store.apiKey = value
-        _state.update { it.copy(apiKey = value) }
-    }
-
-    fun setClientId(value: String) {
-        store.clientId = value
-        _state.update { it.copy(clientId = value) }
+    fun importCookies(text: String) {
+        val ok = Cookies.import(getApplication(), text)
+        _state.update {
+            it.copy(signedIn = ok, toast = if (ok) "Куки приняты" else "В файле нет сессии YouTube")
+        }
     }
 
     fun updateYtdlp() = viewModelScope.launch {
         _state.update { it.copy(toast = "Обновляю yt-dlp…") }
-        val message = Downloader.update(getApplication())
-        _state.update { it.copy(toast = message) }
+        _state.update { it.copy(toast = YtDlp.update(getApplication())) }
     }
 
     fun dismissToast() = _state.update { it.copy(toast = null) }
 
-    // ------------------------------------------------------------- навигация
+    // ------------------------------------------------------------ навигация
 
     fun go(screen: Screen) = _state.update { it.copy(screen = screen) }
 
-    fun setMode(mode: SourceMode) = _state.update { it.copy(mode = mode) }
+    fun setFeed(feed: YtDlp.Feed) {
+        store.lastFeed = feed.name
+        _state.update { it.copy(feed = feed) }
+    }
+
     fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(1, 50)) }
 
     private fun refreshStorage() = _state.update {
@@ -151,54 +135,57 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    // ------------------------------------------------------------- поиск
+    // ------------------------------------------------------------ поиск
 
     fun find() {
-        if (!api.hasCredentials()) {
-            _state.update { it.copy(toast = "Вставь API-ключ или войди в Google.") }
+        val feed = _state.value.feed
+        if (feed.needsLogin && !_state.value.signedIn) {
+            _state.update { it.copy(toast = "Для ленты «${feed.title}» нужен вход в YouTube.") }
             return
         }
         jobHandle?.cancel()
         _state.update {
             it.copy(
-                jobState = JobState.SEARCHING, jobMessage = "Ищу шортсы…",
+                jobState = JobState.SEARCHING, jobMessage = "Читаю ленту «${feed.title}»…",
                 found = emptyList(), foundBytes = 0, checked = 0, toCheck = 0,
                 downloaded = 0, downloadedBytes = 0, skipped = 0, currentTitle = null,
             )
         }
         jobHandle = viewModelScope.launch {
             runCatching {
-                if (_state.value.signedIn) refreshToken()
                 val wanted = _state.value.count
-                val known = store.ids()
-
-                val ids = when (_state.value.mode) {
-                    SourceMode.RANDOM -> api.randomCandidates(wanted, known)
-                    SourceMode.SUBS -> api.subscriptionCandidates(wanted, known)
-                }
-                val pool = api.details(ids).filter { it.id !in known }
-                if (pool.isEmpty()) throw ApiError("Подходящих шортсов не нашлось. Попробуй ещё раз.")
+                val jar = cookies()
+                val pool = YtDlp.feed(feed, wanted, jar, store.ids())
+                if (pool.isEmpty()) error("Лента пустая. Если вход только что сделан, попробуй ещё раз.")
 
                 _state.update { it.copy(jobMessage = "Считаю вес…", toCheck = pool.size) }
 
                 val picked = mutableListOf<Candidate>()
                 for (candidate in pool) {
                     if (picked.size >= wanted) break
-                    val probe = Downloader.probe(candidate.id)
+                    val probe = YtDlp.probe(candidate.id, jar)
                     _state.update { it.copy(checked = it.checked + 1) }
-                    if (probe == null || !probe.isVertical || probe.size <= 0) continue
-                    candidate.size = probe.size
-                    candidate.width = probe.width
-                    candidate.height = probe.height
-                    picked.add(candidate)
+                    if (probe == null || !probe.isVertical || !probe.isShort || probe.size <= 0) continue
+                    picked.add(
+                        candidate.copy(
+                            title = probe.title.ifBlank { candidate.title },
+                            channel = probe.channel.ifBlank { candidate.channel },
+                            duration = probe.duration,
+                            views = probe.views,
+                            likes = probe.likes,
+                            commentCount = probe.commentCount,
+                        ).also {
+                            it.size = probe.size
+                            it.width = probe.width
+                            it.height = probe.height
+                        }
+                    )
                     _state.update {
                         it.copy(found = picked.toList(), foundBytes = picked.sumOf { c -> c.size })
                     }
                 }
 
-                if (picked.isEmpty()) {
-                    throw ApiError("Вертикальных шортсов в выдаче не оказалось. Запусти поиск ещё раз.")
-                }
+                if (picked.isEmpty()) error("Вертикальных шортсов в ленте не нашлось. Попробуй другую ленту.")
                 _state.update {
                     it.copy(jobState = JobState.READY, jobMessage = "Нашёл ${picked.size} шортсов")
                 }
@@ -211,7 +198,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------- загрузка
+    // ------------------------------------------------------------ загрузка
 
     fun startDownload() {
         val batch = _state.value.found
@@ -219,16 +206,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         jobHandle?.cancel()
         _state.update { it.copy(jobState = JobState.DOWNLOADING, jobMessage = "Качаю…") }
         jobHandle = viewModelScope.launch {
+            val jar = cookies()
             for (candidate in batch) {
-                _state.update { it.copy(currentTitle = candidate.title, currentId = candidate.id, currentProgress = 0f) }
+                _state.update {
+                    it.copy(currentTitle = candidate.title, currentId = candidate.id, currentProgress = 0f)
+                }
                 runCatching {
-                    val file = Downloader.download(candidate.id, store.videosDir) { p ->
+                    val file = YtDlp.download(candidate.id, store.videosDir, jar) { p ->
                         _state.update { it.copy(currentProgress = p) }
                     }
-                    val thumb = Downloader.thumbnail(
+                    val thumb = YtDlp.thumbnail(
                         candidate.thumbUrl, File(store.videosDir, "${candidate.id}.jpg")
                     )
-                    val comments = runCatching { api.comments(candidate.id) }.getOrDefault(emptyList())
+                    val comments = YtDlp.comments(candidate.id, jar)
                     val saved = store.save(candidate, file, thumb, comments)
                     _state.update {
                         it.copy(
@@ -253,26 +243,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelJob() {
         jobHandle?.cancel()
-        _state.value.currentId?.let { Downloader.cancel(it) }
+        _state.value.currentId?.let { YtDlp.cancel(it) }
         _state.update {
             it.copy(jobState = JobState.IDLE, jobMessage = "Отменено", currentTitle = null, currentId = null)
         }
         refreshStorage()
     }
 
-    // ------------------------------------------------------------- плеер
+    // ------------------------------------------------------------ плеер
 
     fun openPlayer() {
         watched.clear()
         _state.update {
             it.copy(
-                screen = Screen.PLAYER,
-                queue = store.all(),
-                index = 0,
-                sessionDeleted = 0,
-                sessionFreed = 0,
-                commentsOpen = false,
-                comments = emptyList(),
+                screen = Screen.PLAYER, queue = store.all(), index = 0,
+                sessionDeleted = 0, sessionFreed = 0,
+                commentsOpen = false, comments = emptyList(),
             )
         }
     }
@@ -281,7 +267,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.value.current?.let { watched.add(it.id) }
     }
 
-    /** [direction] = +1 дальше, -1 назад. Просмотренное при уходе вперёд стирается. */
     fun advance(direction: Int) {
         val s = _state.value
         val current = s.current
@@ -289,19 +274,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val freed = store.delete(current.id)
             watched.remove(current.id)
             val queue = s.queue.filterNot { it.id == current.id }
-            if (queue.isEmpty()) {
-                _state.update {
-                    it.copy(
-                        queue = emptyList(), index = 0,
-                        sessionDeleted = it.sessionDeleted + 1,
-                        sessionFreed = it.sessionFreed + freed,
-                        commentsOpen = false,
-                    )
-                }
-                refreshStorage()
-                exitPlayer()
-                return
-            }
             _state.update {
                 it.copy(
                     queue = queue,
@@ -312,9 +284,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             refreshStorage()
+            if (queue.isEmpty()) exitPlayer()
             return
         }
-
         val size = s.queue.size
         if (size == 0) return
         val next = ((s.index + direction) % size + size) % size
@@ -343,10 +315,5 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.clear()
         refreshStorage()
         _state.update { it.copy(toast = "Хранилище очищено") }
-    }
-
-    override fun onCleared() {
-        auth.dispose()
-        super.onCleared()
     }
 }

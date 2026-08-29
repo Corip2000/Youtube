@@ -69,17 +69,10 @@ class Store(context: Context) {
 
     // ---------- настройки ----------
 
-    var apiKey: String
-        get() = prefs.getString("api_key", "") ?: ""
-        set(v) = prefs.edit().putString("api_key", v.trim()).apply()
-
-    var clientId: String
-        get() = prefs.getString("client_id", "") ?: ""
-        set(v) = prefs.edit().putString("client_id", v.trim()).apply()
-
-    var authState: String?
-        get() = prefs.getString("auth_state", null)
-        set(v) = prefs.edit().apply { if (v == null) remove("auth_state") else putString("auth_state", v) }.apply()
+    /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
+    var lastFeed: String
+        get() = prefs.getString("last_feed", "RECOMMENDED") ?: "RECOMMENDED"
+        set(v) = prefs.edit().putString("last_feed", v).apply()
 
     // ---------- индекс ----------
 

@@ -25,14 +25,14 @@ android {
 
     defaultConfig {
         applicationId = "ru.corip.shortsoffline"
-        minSdk = 26
+        minSdk = 26   // адаптивная иконка + без legacy-хвостов
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
-        manifestPlaceholders["appAuthRedirectScheme"] = "ru.corip.shortsoffline"
-
         ndk {
+            // Почти все телефоны с 2018 года — arm64. Добавь "armeabi-v7a",
+            // если нужна поддержка совсем старых, но APK потяжелеет.
             abiFilters += listOf("arm64-v8a")
         }
     }
@@ -53,7 +53,7 @@ android {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = false   // yt-dlp тащит рефлексию, обфускация всё ломает
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystoreFile.exists() && keystoreProps != null) {
@@ -74,6 +74,7 @@ android {
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/DEPENDENCIES")
+        // Python и yt-dlp лежат внутри .so — их нельзя сжимать.
         jniLibs.useLegacyPackaging = true
     }
 }
@@ -92,12 +93,14 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
+    // Плеер
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
 
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    implementation("net.openid:appauth:0.11.1")
-
+    // yt-dlp + python внутри APK
+    // Только library: ffmpeg не подключаем. Он нужен для склейки отдельных
+    // видео/аудио дорожек, а мы берём готовый прогрессивный mp4 — шортсы
+    // короткие, разница в качестве копеечная, зато APK легче на ~30 МБ
+    // и на одну хрупкую зависимость меньше.
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
 }

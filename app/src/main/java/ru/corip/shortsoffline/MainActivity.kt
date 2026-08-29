@@ -3,10 +3,8 @@ package ru.corip.shortsoffline
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.corip.shortsoffline.ui.DownloadScreen
+import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
 import ru.corip.shortsoffline.ui.PlayerScreen
@@ -39,10 +38,6 @@ private fun App(vm: AppViewModel = viewModel()) {
     val state by vm.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
 
-    val signInLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result -> vm.onAuthResult(result.data) }
-
     LaunchedEffect(state.toast) {
         state.toast?.let {
             snackbar.showSnackbar(it)
@@ -54,6 +49,7 @@ private fun App(vm: AppViewModel = viewModel()) {
         when {
             state.commentsOpen -> vm.closeComments()
             state.screen == Screen.PLAYER -> vm.exitPlayer()
+            state.screen == Screen.LOGIN -> vm.finishLogin()
             else -> vm.go(Screen.MENU)
         }
     }
@@ -64,9 +60,8 @@ private fun App(vm: AppViewModel = viewModel()) {
             .background(Palette.Void)
     ) {
         when (state.screen) {
-            Screen.MENU -> MenuScreen(state, vm) {
-                vm.authIntent()?.let(signInLauncher::launch)
-            }
+            Screen.MENU -> MenuScreen(state, vm)
+            Screen.LOGIN -> LoginScreen(onDone = { vm.finishLogin() })
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
             Screen.PLAYER -> PlayerScreen(state, vm)
         }
