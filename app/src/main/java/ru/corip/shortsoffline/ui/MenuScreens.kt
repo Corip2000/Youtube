@@ -367,7 +367,11 @@ private fun JobPanel(state: UiState, vm: AppViewModel) {
             }
             JobState.FAILED -> {
                 Spacer(Modifier.height(10.dp))
-                Text(state.jobMessage, style = Type.Small.copy(color = Palette.Signal))
+                Text(
+                    state.jobMessage,
+                    style = Type.Small.copy(color = Palette.Signal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
             else -> Unit
         }

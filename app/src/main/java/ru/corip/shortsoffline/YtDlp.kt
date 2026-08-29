@@ -25,6 +25,24 @@ object YtDlp {
 
     @Volatile private var ready = false
 
+    /** Последняя ошибка от yt-dlp целиком — её показываем пользователю. */
+    @Volatile
+    var lastError: String? = null
+        private set
+
+    private fun run(req: YoutubeDLRequest): String =
+        try {
+            YoutubeDL.getInstance().execute(req).out
+        } catch (e: Exception) {
+            lastError = (e.message ?: e.toString())
+                .lineSequence()
+                .filter { it.isNotBlank() }
+                .filter { !it.startsWith("WARNING") }
+                .joinToString(" ")
+                .take(300)
+            throw e
+        }
+
     suspend fun init(context: Context) = withContext(Dispatchers.IO) {
         if (!ready) {
             YoutubeDL.getInstance().init(context)
@@ -85,7 +103,7 @@ object YtDlp {
             addOption("--dump-single-json")
             addOption("--playlist-end", limit.toString())
         }
-        return parse(YoutubeDL.getInstance().execute(req).out)
+        return parse(run(req))
     }
 
     private fun entryToCandidate(e: JSONObject, fromShorts: Boolean): Candidate? {
@@ -181,7 +199,7 @@ object YtDlp {
                 addOption("--dump-single-json")
                 addOption("--skip-download")
             }
-            val json = parse(YoutubeDL.getInstance().execute(req).out)
+            val json = parse(run(req))
 
             var size = 0L
             json.optJSONArray("requested_downloads")?.let { arr ->
@@ -245,7 +263,7 @@ object YtDlp {
                     "youtube:comment_sort=top;max_comments=all,$maxTop,all,$maxReplies",
                 )
             }
-            val arr = parse(YoutubeDL.getInstance().execute(req).out)
+            val arr = parse(run(req))
                 .optJSONArray("comments") ?: return@withContext emptyList()
 
             val tops = LinkedHashMap<String, MutableList<Reply>>()

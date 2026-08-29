@@ -201,10 +201,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (picked.isEmpty()) {
                     error(
                         "Ничего не подошло из ${pool.size}. " +
-                            "Не отозвались: $noProbe, длинные: $notShort, не вертикальные: $notVertical. " +
-                            if (noProbe > notShort + notVertical)
-                                "Похоже, YouTube не отвечает без входа."
-                            else "Попробуй другую ленту."
+                            "Не отозвались: $noProbe, длинные: $notShort, не вертикальные: $notVertical." +
+                            (YtDlp.lastError?.let { "\n\nyt-dlp сказал: $it" } ?: "")
                     )
                 }
                 _state.update {
@@ -212,9 +210,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }.onFailure { e ->
                 if (e is kotlinx.coroutines.CancellationException) return@onFailure
-                _state.update {
-                    it.copy(jobState = JobState.FAILED, jobMessage = e.message ?: "Что-то пошло не так.")
-                }
+                val detail = YtDlp.lastError
+                val text = (e.message ?: "Что-то пошло не так.") +
+                    if (detail != null && e.message?.contains(detail) != true) "\n\nyt-dlp сказал: $detail" else ""
+                _state.update { it.copy(jobState = JobState.FAILED, jobMessage = text) }
             }
         }
     }
