@@ -1,3 +1,8 @@
+// Импорт обязателен: в Gradle Kotlin DSL `java` — это свойство проекта
+// (расширение Java-плагина), оно перекрывает пакет java.*, и записать
+// java.util.Properties напрямую нельзя.
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -8,9 +13,11 @@ plugins {
 // SHA-1 в Google Cloud должен совпадать с ключом, которым подписан APK.
 // Положи keystore.jks в папку app/ и создай app/keystore.properties.
 val keystoreFile = file("keystore.jks")
-val keystoreProps = file("keystore.properties").takeIf { it.exists() }?.let {
-    java.util.Properties().apply { it.inputStream().use(::load) }
-}
+val keystoreProps: Properties? = file("keystore.properties")
+    .takeIf { it.exists() }
+    ?.let { propsFile ->
+        Properties().apply { propsFile.inputStream().use { stream -> load(stream) } }
+    }
 
 android {
     namespace = "ru.corip.shortsoffline"
@@ -18,17 +25,14 @@ android {
 
     defaultConfig {
         applicationId = "ru.corip.shortsoffline"
-        minSdk = 26   // адаптивная иконка + без legacy-хвостов
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
-        // Схема редиректа для OAuth (AppAuth ловит её обратно в приложение).
         manifestPlaceholders["appAuthRedirectScheme"] = "ru.corip.shortsoffline"
 
         ndk {
-            // Почти все телефоны с 2018 года — arm64. Добавь "armeabi-v7a",
-            // если нужна поддержка совсем старых, но APK потяжелеет.
             abiFilters += listOf("arm64-v8a")
         }
     }
@@ -49,7 +53,7 @@ android {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false   // yt-dlp тащит рефлексию, обфускация всё ломает
+            isMinifyEnabled = false
             isShrinkResources = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (keystoreFile.exists() && keystoreProps != null) {
@@ -70,7 +74,6 @@ android {
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "META-INF/DEPENDENCIES")
-        // Python и yt-dlp лежат внутри .so — их нельзя сжимать.
         jniLibs.useLegacyPackaging = true
     }
 }
@@ -89,20 +92,12 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
 
-    // Плеер
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
 
-    // Сеть к YouTube Data API
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
-    // Вход в Google без Play Services
     implementation("net.openid:appauth:0.11.1")
 
-    // yt-dlp + python внутри APK
-    // Только library: ffmpeg не подключаем. Он нужен для склейки отдельных
-    // видео/аудио дорожек, а мы берём готовый прогрессивный mp4 — шортсы
-    // короткие, разница в качестве копеечная, зато APK легче на ~30 МБ
-    // и на одну хрупкую зависимость меньше.
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
 }
