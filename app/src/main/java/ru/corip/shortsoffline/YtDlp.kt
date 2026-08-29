@@ -82,8 +82,8 @@ object YtDlp {
             buildList {
                 for (i in 0 until entries.length()) {
                     val e = entries.optJSONObject(i) ?: continue
-                    val id = e.optString("id").ifBlank { continue }
-                    if (id in exclude) continue
+                    val id = e.optString("id")
+                    if (id.isBlank() || id in exclude) continue
                     val duration = e.optInt("duration", -1)
                     if (duration > MAX_SHORT_SECONDS) continue   // -1 = неизвестно, оставляем
                     add(
@@ -209,7 +209,8 @@ object YtDlp {
 
             for (i in 0 until arr.length()) {
                 val c = arr.optJSONObject(i) ?: continue
-                val cid = c.optString("id").ifBlank { continue }
+                val cid = c.optString("id")
+                if (cid.isBlank()) continue
                 val author = c.optString("author").removePrefix("@")
                 val text = c.optString("text")
                 val likes = c.optLong("like_count")
