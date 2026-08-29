@@ -14,17 +14,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Raspakovat arhiv v koren repozitoriya
+      - name: Raspakovat lyuboy arhiv proekta
         run: |
-          if [ -f ShortsOffline-kotlin.zip ]; then
-            unzip -o -q ShortsOffline-kotlin.zip -d .
-            rm ShortsOffline-kotlin.zip
+          zip=$(ls -1 ShortsOffline*.zip 2>/dev/null | head -1)
+          if [ -n "$zip" ]; then
+            echo "Raspakovyvayu $zip"
+            unzip -o -q "$zip" -d .
+            rm -f ShortsOffline*.zip
             rm -f .github/workflows/build-apk.yml
             git config user.name 'github-actions'
             git config user.email 'actions@github.com'
             git add -A
-            git commit -m 'Raspakovat derevo proekta iz arhiva [skip ci]'
+            git commit -m 'Obnovit derevo proekta iz arhiva [skip ci]'
             git push
+          else
+            echo 'Arhivov net, sobirayu tekushchee derevo'
           fi
           ls -1
 
