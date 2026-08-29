@@ -27,6 +27,8 @@ data class Candidate(
     val likes: Long,
     val commentCount: Long,
     val thumbUrl: String?,
+    /** Взят из вкладки /shorts или хэштега — значит это точно шортс. */
+    val fromShortsFeed: Boolean = false,
     var size: Long = 0,
     var width: Int = 0,
     var height: Int = 0,

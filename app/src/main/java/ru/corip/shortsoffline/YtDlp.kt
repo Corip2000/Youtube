@@ -57,49 +57,93 @@ object YtDlp {
 
     // ------------------------------------------------------------------ ленты
 
-    enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
-        RECOMMENDED(":ytrec", "Рекомендации", true),
-        SUBSCRIPTIONS(":ytsubs", "Подписки", true),
-        LIKED(":ytfav", "Понравившиеся", true),
-        HISTORY(":ythistory", "История", true),
-        TRENDING("https://www.youtube.com/feed/trending", "В тренде", false),
+    /**
+     * viaChannels: в домашней ленте и подписках лежат обычные ролики, шортсов
+     * там почти нет. Поэтому из такой ленты берём каналы, а шортсы тянем из
+     * их вкладки /shorts — там гарантированно только вертикальные.
+     */
+    enum class Feed(
+        val target: String,
+        val title: String,
+        val needsLogin: Boolean,
+        val viaChannels: Boolean,
+    ) {
+        RECOMMENDED(":ytrec", "Рекомендации", true, true),
+        SUBSCRIPTIONS(":ytsubs", "Подписки", true, true),
+        LIKED(":ytfav", "Понравившиеся", true, false),
+        HISTORY(":ythistory", "История", true, false),
+        HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false, false),
     }
 
     /**
      * Список роликов из ленты без захода в каждый — быстро.
      * Длинные отсекаем сразу, вертикальность выяснит [probe].
      */
+    private fun flat(target: String, cookies: File?, limit: Int): JSONObject {
+        val req = request(target, cookies).apply {
+            addOption("--flat-playlist")
+            addOption("--dump-single-json")
+            addOption("--playlist-end", limit.toString())
+        }
+        return parse(YoutubeDL.getInstance().execute(req).out)
+    }
+
+    private fun entryToCandidate(e: JSONObject, fromShorts: Boolean): Candidate? {
+        val id = e.optString("id")
+        if (id.isBlank() || id.length != 11) return null
+        val duration = e.optInt("duration", -1)
+        if (duration > MAX_SHORT_SECONDS) return null
+        return Candidate(
+            id = id,
+            title = e.optString("title").ifBlank { id },
+            channel = e.optString("channel").ifBlank { e.optString("uploader") },
+            duration = if (duration > 0) duration else 0,
+            views = e.optLong("view_count"),
+            likes = 0,
+            commentCount = 0,
+            thumbUrl = firstThumb(e),
+            fromShortsFeed = fromShorts,
+        )
+    }
+
+    /** Список роликов из ленты без захода в каждый — быстро. */
     suspend fun feed(feed: Feed, limit: Int, cookies: File?, exclude: Set<String>): List<Candidate> =
         withContext(Dispatchers.IO) {
-            val req = request(feed.target, cookies).apply {
-                addOption("--flat-playlist")
-                addOption("--dump-single-json")
-                addOption("--playlist-end", (limit * 6).toString())
-            }
-            val json = parse(YoutubeDL.getInstance().execute(req).out)
-            val entries = json.optJSONArray("entries") ?: return@withContext emptyList()
+            val root = flat(feed.target, cookies, if (feed.viaChannels) 60 else limit * 6)
+            val entries = root.optJSONArray("entries") ?: return@withContext emptyList()
 
-            buildList {
-                for (i in 0 until entries.length()) {
-                    val e = entries.optJSONObject(i) ?: continue
-                    val id = e.optString("id")
-                    if (id.isBlank() || id in exclude) continue
-                    val duration = e.optInt("duration", -1)
-                    if (duration > MAX_SHORT_SECONDS) continue   // -1 = неизвестно, оставляем
-                    add(
-                        Candidate(
-                            id = id,
-                            title = e.optString("title").ifBlank { id },
-                            channel = e.optString("channel").ifBlank { e.optString("uploader") },
-                            duration = if (duration > 0) duration else 0,
-                            views = e.optLong("view_count"),
-                            likes = 0,
-                            commentCount = 0,
-                            thumbUrl = firstThumb(e),
-                        )
-                    )
+            if (!feed.viaChannels) {
+                return@withContext buildList {
+                    for (i in 0 until entries.length()) {
+                        val e = entries.optJSONObject(i) ?: continue
+                        val c = entryToCandidate(e, feed == Feed.HASHTAG) ?: continue
+                        if (c.id !in exclude) add(c)
+                    }
                 }
             }
+
+            // Собираем каналы из ленты и идём в их вкладку /shorts.
+            val channels = LinkedHashSet<String>()
+            for (i in 0 until entries.length()) {
+                val e = entries.optJSONObject(i) ?: continue
+                val link = e.optString("channel_url").ifBlank { e.optString("uploader_url") }
+                if (link.startsWith("http")) channels.add(link.trimEnd('/'))
+            }
+
+            val out = mutableListOf<Candidate>()
+            for (channel in channels.shuffled()) {
+                if (out.size >= limit * 3) break
+                runCatching {
+                    val tab = flat("$channel/shorts", cookies, 30)
+                    val items = tab.optJSONArray("entries") ?: return@runCatching
+                    for (i in 0 until items.length()) {
+                        val e = items.optJSONObject(i) ?: continue
+                        val c = entryToCandidate(e, true) ?: continue
+                        if (c.id !in exclude && out.none { it.id == c.id }) out.add(c)
+                    }
+                }
+            }
+            out.shuffled()
         }
 
     private fun firstThumb(entry: JSONObject): String? {

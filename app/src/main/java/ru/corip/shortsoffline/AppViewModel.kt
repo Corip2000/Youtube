@@ -156,16 +156,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val wanted = _state.value.count
                 val jar = cookies()
                 val pool = YtDlp.feed(feed, wanted, jar, store.ids())
-                if (pool.isEmpty()) error("Лента пустая. Если вход только что сделан, попробуй ещё раз.")
+                if (pool.isEmpty()) {
+                    error(
+                        if (feed.needsLogin)
+                            "Лента пустая — обычно это значит, что сессия YouTube не подхватилась. Проверь вход."
+                        else "Лента пустая. Попробуй ещё раз."
+                    )
+                }
 
                 _state.update { it.copy(jobMessage = "Считаю вес…", toCheck = pool.size) }
 
                 val picked = mutableListOf<Candidate>()
+                var noProbe = 0
+                var notShort = 0
+                var notVertical = 0
                 for (candidate in pool) {
                     if (picked.size >= wanted) break
                     val probe = YtDlp.probe(candidate.id, jar)
                     _state.update { it.copy(checked = it.checked + 1) }
-                    if (probe == null || !probe.isVertical || !probe.isShort || probe.size <= 0) continue
+                    if (probe == null || probe.size <= 0) { noProbe++; continue }
+                    if (!probe.isShort) { notShort++; continue }
+                    // Из вкладки /shorts всё вертикальное по определению,
+                    // но yt-dlp иногда не отдаёт размеры кадра — не бракуем зря.
+                    if (!probe.isVertical && !candidate.fromShortsFeed) { notVertical++; continue }
                     picked.add(
                         candidate.copy(
                             title = probe.title.ifBlank { candidate.title },
@@ -185,7 +198,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }
 
-                if (picked.isEmpty()) error("Вертикальных шортсов в ленте не нашлось. Попробуй другую ленту.")
+                if (picked.isEmpty()) {
+                    error(
+                        "Ничего не подошло из ${pool.size}. " +
+                            "Не отозвались: $noProbe, длинные: $notShort, не вертикальные: $notVertical. " +
+                            if (noProbe > notShort + notVertical)
+                                "Похоже, YouTube не отвечает без входа."
+                            else "Попробуй другую ленту."
+                    )
+                }
                 _state.update {
                     it.copy(jobState = JobState.READY, jobMessage = "Нашёл ${picked.size} шортсов")
                 }
