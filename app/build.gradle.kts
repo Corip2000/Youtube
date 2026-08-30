@@ -98,9 +98,8 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
 
     // yt-dlp + python внутри APK
-    // Только library: ffmpeg не подключаем. Он нужен для склейки отдельных
-    // видео/аудио дорожек, а мы берём готовый прогрессивный mp4 — шортсы
-    // короткие, разница в качестве копеечная, зато APK легче на ~30 МБ
-    // и на одну хрупкую зависимость меньше.
+    // ffmpeg нужен обязательно: YouTube для части роликов отдаёт только
+    // раздельные видео- и аудиодорожки, без склейки их не скачать.
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 }

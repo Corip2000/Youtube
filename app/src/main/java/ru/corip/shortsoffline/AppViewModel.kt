@@ -44,6 +44,7 @@ data class UiState(
     val currentId: String? = null,
     val currentProgress: Float = 0f,
     val skipped: Int = 0,
+    val downloadError: String? = null,
 
     val queue: List<Saved> = emptyList(),
     val index: Int = 0,
@@ -52,6 +53,7 @@ data class UiState(
 
     val customUrl: String = "",
     val diagnostics: String? = null,
+    val ytdlpVersion: String? = null,
     val toast: String? = null,
 ) {
     val current: Saved? get() = queue.getOrNull(index)
@@ -79,6 +81,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshStorage()
         viewModelScope.launch {
             withContext(Dispatchers.IO) { runCatching { YtDlp.init(getApplication()) } }
+            val v = YtDlp.version(getApplication())
+            _state.update { it.copy(ytdlpVersion = v) }
+            // Версия неизвестна — бинарник ни разу не обновлялся. Тянем сразу,
+            // иначе YouTube не отдаст ни одного ролика.
+            if (v == null) {
+                _state.update { it.copy(toast = "Обновляю yt-dlp при первом запуске…") }
+                YtDlp.update(getApplication())
+                _state.update { it.copy(ytdlpVersion = YtDlp.version(getApplication())) }
+            }
         }
     }
 
@@ -113,8 +124,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateYtdlp() = viewModelScope.launch {
-        _state.update { it.copy(toast = "Обновляю yt-dlp…") }
-        _state.update { it.copy(toast = YtDlp.update(getApplication())) }
+        _state.update { it.copy(diagnostics = "Обновляю yt-dlp, это займёт до минуты…") }
+        val report = YtDlp.update(getApplication())
+        _state.update { it.copy(diagnostics = report, ytdlpVersion = YtDlp.version(getApplication())) }
     }
 
     fun dismissToast() = _state.update { it.copy(toast = null) }
@@ -166,6 +178,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 jobState = JobState.SEARCHING, jobMessage = "Читаю ленту «${feed.title}»…",
                 found = emptyList(), foundBytes = 0, checked = 0, toCheck = 0,
                 downloaded = 0, downloadedBytes = 0, skipped = 0, currentTitle = null,
+                downloadError = null,
             )
         }
         jobHandle = viewModelScope.launch {
@@ -262,16 +275,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             downloadedBytes = it.downloadedBytes + saved.bytes,
                         )
                     }
-                }.onFailure {
-                    _state.update { s -> s.copy(skipped = s.skipped + 1) }
+                }.onFailure { e ->
+                    // Показываем первую настоящую причину, а не молчаливый счётчик.
+                    val detail = YtDlp.lastError ?: e.message ?: e.toString()
+                    _state.update { s ->
+                        s.copy(
+                            skipped = s.skipped + 1,
+                            downloadError = s.downloadError ?: detail,
+                        )
+                    }
                 }
                 refreshStorage()
             }
             _state.update {
+                val base = "Скачано ${it.downloaded} · ${formatBytes(it.downloadedBytes)}" +
+                    if (it.skipped > 0) " · пропущено ${it.skipped}" else ""
                 it.copy(
-                    jobState = JobState.DONE, currentTitle = null, currentId = null,
-                    jobMessage = "Скачано ${it.downloaded} · ${formatBytes(it.downloadedBytes)}" +
-                        if (it.skipped > 0) " · пропущено ${it.skipped}" else "",
+                    jobState = if (it.downloaded == 0 && it.skipped > 0) JobState.FAILED else JobState.DONE,
+                    currentTitle = null, currentId = null,
+                    jobMessage = base + (it.downloadError?.let { d -> "\n\nyt-dlp сказал: $d" } ?: ""),
                 )
             }
         }

@@ -24,6 +24,7 @@ object YtDlp {
     const val MAX_SHORT_SECONDS = 180
 
     @Volatile private var ready = false
+    @Volatile private var ffmpegReady = false
 
     /** Последняя ошибка от yt-dlp целиком — её показываем пользователю. */
     @Volatile
@@ -46,15 +47,56 @@ object YtDlp {
     suspend fun init(context: Context) = withContext(Dispatchers.IO) {
         if (!ready) {
             YoutubeDL.getInstance().init(context)
+            ffmpegReady = initFfmpeg(context)
             ready = true
         }
     }
 
+    /**
+     * ffmpeg поднимаем через рефлексию: в разных версиях библиотеки класс лежит
+     * то в com.yausername.ffmpeg, то в com.yausername.youtubedl_android.ffmpeg.
+     * Так сборка не зависит от того, угадал ли я пакет.
+     */
+    private fun initFfmpeg(context: Context): Boolean {
+        val names = listOf(
+            "com.yausername.ffmpeg.FFmpeg",
+            "com.yausername.youtubedl_android.ffmpeg.FFmpeg",
+        )
+        for (name in names) {
+            val ok = runCatching {
+                val cls = Class.forName(name)
+                val instance = cls.getMethod("getInstance").invoke(null)
+                cls.getMethod("init", Context::class.java).invoke(instance, context)
+                true
+            }.getOrDefault(false)
+            if (ok) return true
+        }
+        return false
+    }
+
+    fun hasFfmpeg(): Boolean = ffmpegReady
+
+    fun version(context: Context): String? =
+        runCatching { YoutubeDL.getInstance().version(context) }.getOrNull()
+
+    /** Обновление бинарника. Возвращает подробный отчёт, а не короткий тост. */
     suspend fun update(context: Context): String = withContext(Dispatchers.IO) {
+        val before = version(context) ?: "неизвестна"
         runCatching {
             YoutubeDL.getInstance().updateYoutubeDL(context)
-            "yt-dlp обновлён"
-        }.getOrElse { "Обновить не вышло: ${it.message}" }
+            val after = version(context) ?: "всё ещё неизвестна"
+            if (after == before) {
+                "Версия не изменилась: $before\n\n" +
+                    "Если она \"неизвестна\", обновление не скачалось. " +
+                    "Проверь, что VPN включён для всего телефона, а не только для браузера — " +
+                    "бинарник тянется с github.com."
+            } else {
+                "Обновлено\nБыло: $before\nСтало: $after"
+            }
+        }.getOrElse {
+            "Обновить не вышло.\n\n${it.message}\n\n" +
+                "Чаще всего это блокировка github.com. Включи VPN на весь телефон и повтори."
+        }
     }
 
     private fun url(id: String) = "https://www.youtube.com/watch?v=$id"
@@ -101,6 +143,7 @@ object YtDlp {
     suspend fun diagnose(context: Context, cookies: File?): String = withContext(Dispatchers.IO) {
         val report = StringBuilder()
         report.append(if (cookies != null) "Куки: подключены\n" else "Куки: нет\n")
+        report.append(if (ffmpegReady) "ffmpeg: готов\n" else "ffmpeg: НЕ поднялся\n")
 
         runCatching {
             val v = YoutubeDL.getInstance().version(context)
@@ -243,7 +286,7 @@ object YtDlp {
             // Без куков: ролики публичные, а с куками YouTube отдаёт
             // "The page needs to be reloaded" (баг yt-dlp #17389).
             val req = request(url(id), null).apply {
-                addOption("-f", FORMAT)
+                addOption("-f", format())
                 addOption("--dump-single-json")
                 addOption("--skip-download")
             }
@@ -357,9 +400,10 @@ object YtDlp {
     ): File = withContext(Dispatchers.IO) {
         dir.mkdirs()
         val req = request(url(id), null).apply {
-            addOption("-f", FORMAT)
+            addOption("-f", format())
             addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
             addOption("--no-mtime")
+            if (ffmpegReady) addOption("--merge-output-format", "mp4")
         }
         YoutubeDL.getInstance().execute(req, id) { progress, _, _ ->
             onProgress((progress / 100f).coerceIn(0f, 1f))

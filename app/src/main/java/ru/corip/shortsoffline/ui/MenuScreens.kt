@@ -149,6 +149,13 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
 
         Spacer(Modifier.height(20.dp))
         Text(
+            "yt-dlp: " + (state.ytdlpVersion ?: "не обновлён — нажми «Обновить yt-dlp»"),
+            style = Type.Small.copy(
+                color = if (state.ytdlpVersion == null) Palette.Signal else Palette.Jade
+            ),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
             "За всё время: скачано ${state.lifetime.downloaded} · " +
                 "удалено ${state.lifetime.deleted} · " +
                 "освобождено ${formatBytes(state.lifetime.freed)}",
