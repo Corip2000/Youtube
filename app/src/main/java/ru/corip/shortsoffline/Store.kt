@@ -72,6 +72,10 @@ class Store(context: Context) {
     // ---------- настройки ----------
 
     /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
+    var customTarget: String
+        get() = prefs.getString("custom_target", "") ?: ""
+        set(v) = prefs.edit().putString("custom_target", v.trim()).apply()
+
     var lastFeed: String
         get() = prefs.getString("last_feed", "RECOMMENDED") ?: "RECOMMENDED"
         set(v) = prefs.edit().putString("last_feed", v).apply()

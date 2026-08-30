@@ -91,6 +91,7 @@ object YtDlp {
         LIKED(":ytfav", "Понравившиеся", true, false),
         HISTORY(":ythistory", "История", true, false),
         HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false, false),
+        CUSTOM("", "Своя ссылка", false, false),
     }
 
     /**
@@ -104,6 +105,31 @@ object YtDlp {
             addOption("--playlist-end", limit.toString())
         }
         return parse(run(req))
+    }
+
+    /** Один запрос к YouTube, чтобы увидеть живой ответ, а не мои догадки. */
+    suspend fun diagnose(cookies: File?): String = withContext(Dispatchers.IO) {
+        val report = StringBuilder()
+        report.append(if (cookies != null) "Куки: подключены\n" else "Куки: нет\n")
+
+        runCatching {
+            val v = YoutubeDL.getInstance().version(null as Context?)
+            report.append("Версия yt-dlp: ").append(v ?: "неизвестна").append("\n")
+        }.onFailure { report.append("Версию получить не вышло\n") }
+
+        report.append("\n")
+        runCatching {
+            val json = flat("https://www.youtube.com/hashtag/shorts", cookies, 3)
+            val n = json.optJSONArray("entries")?.length() ?: 0
+            report.append("Хэштег #shorts: получено роликов ").append(n)
+            if (n > 0) {
+                report.append("\nПервый: ")
+                    .append(json.optJSONArray("entries")?.optJSONObject(0)?.optString("title"))
+            }
+        }.onFailure {
+            report.append("Хэштег #shorts не открылся.\n").append(lastError ?: it.message)
+        }
+        report.toString()
     }
 
     private fun entryToCandidate(e: JSONObject, fromShorts: Boolean): Candidate? {
@@ -125,10 +151,25 @@ object YtDlp {
     }
 
     /** Список роликов из ленты без захода в каждый — быстро. */
-    suspend fun feed(feed: Feed, limit: Int, cookies: File?, exclude: Set<String>): List<Candidate> =
+    suspend fun feed(
+        feed: Feed,
+        limit: Int,
+        cookies: File?,
+        exclude: Set<String>,
+        customTarget: String = "",
+    ): List<Candidate> =
         withContext(Dispatchers.IO) {
-            val root = flat(feed.target, cookies, if (feed.viaChannels) 60 else limit * 6)
-            val entries = root.optJSONArray("entries") ?: return@withContext emptyList()
+            val target = if (feed == Feed.CUSTOM) customTarget.trim() else feed.target
+            require(target.isNotBlank()) { "Впиши ссылку на канал, плейлист или хэштег." }
+
+            val root = flat(target, cookies, if (feed.viaChannels) 60 else limit * 6)
+            val entries = root.optJSONArray("entries")
+            if (entries == null || entries.length() == 0) {
+                error(
+                    "yt-dlp открыл \"" + root.optString("title").ifBlank { target } + "\", " +
+                        "но роликов там нет (тип: " + root.optString("_type").ifBlank { "?" } + ")."
+                )
+            }
 
             if (!feed.viaChannels) {
                 return@withContext buildList {

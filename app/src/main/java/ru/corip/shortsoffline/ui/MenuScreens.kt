@@ -162,11 +162,36 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
                 modifier = Modifier.clickable { vm.updateYtdlp() },
             )
             Text(
+                "Проверить связь",
+                style = Type.Small.copy(color = Palette.Jade),
+                modifier = Modifier.clickable { vm.runDiagnostics() },
+            )
+            Text(
                 "Стереть всё",
                 style = Type.Small.copy(color = Palette.Signal),
                 modifier = Modifier.clickable { confirmClear = true },
             )
         }
+    }
+
+    state.diagnostics?.let { report ->
+        AlertDialog(
+            onDismissRequest = { vm.dismissDiagnostics() },
+            containerColor = Palette.Panel,
+            title = { Text("Что ответил YouTube", style = Type.Data) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(report, style = Type.Small.copy(color = Palette.Ink))
+                }
+            },
+            confirmButton = {
+                Text(
+                    "Закрыть",
+                    style = Type.Data.copy(color = Palette.Signal),
+                    modifier = Modifier.clickable { vm.dismissDiagnostics() },
+                )
+            },
+        )
     }
 
     if (confirmClear) {
@@ -226,6 +251,26 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
         Panel {
             Text("ЛЕНТА", style = Type.Label)
             Spacer(Modifier.height(10.dp))
+            if (state.feed == YtDlp.Feed.CUSTOM) {
+                OutlinedTextField(
+                    value = state.customUrl,
+                    onValueChange = { vm.setCustomUrl(it) },
+                    label = { Text("Ссылка на канал, плейлист или хэштег", style = Type.Label) },
+                    placeholder = {
+                        Text("https://www.youtube.com/@channel/shorts", style = Type.Small)
+                    },
+                    singleLine = true,
+                    textStyle = Type.Data.copy(fontSize = 12.sp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Palette.Sink,
+                        unfocusedContainerColor = Palette.Sink,
+                        focusedIndicatorColor = Palette.Signal,
+                        unfocusedIndicatorColor = Palette.Edge,
+                        cursorColor = Palette.Signal,
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                )
+            }
             YtDlp.Feed.entries.forEach { feed ->
                 val locked = feed.needsLogin && !state.signedIn
                 Box(Modifier.padding(bottom = 8.dp)) {

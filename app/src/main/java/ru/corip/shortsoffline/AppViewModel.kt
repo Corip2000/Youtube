@@ -50,6 +50,8 @@ data class UiState(
     val comments: List<Comment> = emptyList(),
     val commentsOpen: Boolean = false,
 
+    val customUrl: String = "",
+    val diagnostics: String? = null,
     val toast: String? = null,
 ) {
     val current: Saved? get() = queue.getOrNull(index)
@@ -71,7 +73,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
-        _state.update { it.copy(feed = saved, signedIn = Cookies.isSignedIn(app)) }
+        _state.update {
+            it.copy(feed = saved, signedIn = Cookies.isSignedIn(app), customUrl = store.customTarget)
+        }
         refreshStorage()
         viewModelScope.launch {
             withContext(Dispatchers.IO) { runCatching { YtDlp.init(getApplication()) } }
@@ -124,6 +128,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(feed = feed) }
     }
 
+    fun setCustomUrl(value: String) {
+        store.customTarget = value
+        _state.update { it.copy(customUrl = value) }
+    }
+
+    fun runDiagnostics() = viewModelScope.launch {
+        _state.update { it.copy(diagnostics = "Проверяю…") }
+        val report = YtDlp.diagnose(cookies())
+        _state.update { it.copy(diagnostics = report) }
+    }
+
+    fun dismissDiagnostics() = _state.update { it.copy(diagnostics = null) }
+
     fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(1, 50)) }
 
     private fun refreshStorage() = _state.update {
@@ -155,7 +172,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             runCatching {
                 val wanted = _state.value.count
                 val jar = cookies()
-                val pool = YtDlp.feed(feed, wanted, jar, store.ids())
+                val pool = YtDlp.feed(feed, wanted, jar, store.ids(), _state.value.customUrl)
                 if (pool.isEmpty()) {
                     error(
                         if (feed.needsLogin)
