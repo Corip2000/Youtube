@@ -75,23 +75,13 @@ object YtDlp {
 
     // ------------------------------------------------------------------ ленты
 
-    /**
-     * viaChannels: в домашней ленте и подписках лежат обычные ролики, шортсов
-     * там почти нет. Поэтому из такой ленты берём каналы, а шортсы тянем из
-     * их вкладки /shorts — там гарантированно только вертикальные.
-     */
-    enum class Feed(
-        val target: String,
-        val title: String,
-        val needsLogin: Boolean,
-        val viaChannels: Boolean,
-    ) {
-        RECOMMENDED(":ytrec", "Рекомендации", true, true),
-        SUBSCRIPTIONS(":ytsubs", "Подписки", true, true),
-        LIKED(":ytfav", "Понравившиеся", true, false),
-        HISTORY(":ythistory", "История", true, false),
-        HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false, false),
-        CUSTOM("", "Своя ссылка", false, false),
+    enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
+        RECOMMENDED(":ytrec", "Рекомендации", true),
+        SUBSCRIPTIONS(":ytsubs", "Подписки", true),
+        LIKED(":ytfav", "Понравившиеся", true),
+        HISTORY(":ythistory", "История", true),
+        HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false),
+        CUSTOM("", "Своя ссылка", false),
     }
 
     /**
@@ -115,7 +105,7 @@ object YtDlp {
         runCatching {
             val v = YoutubeDL.getInstance().version(context)
             report.append("Версия yt-dlp: ").append(v ?: "неизвестна").append("\n")
-        }.onFailure { report.append("Версию получить не вышло\n") }
+        }.onFailure { report.append("Версия yt-dlp: не определилась (нажми «Обновить yt-dlp»)\n") }
 
         report.append("\n")
         runCatching {
@@ -174,7 +164,11 @@ object YtDlp {
         )
     }
 
-    /** Список роликов из ленты без захода в каждый — быстро. */
+    /**
+     * Список роликов из ленты. Личные ленты отдают только id/title/duration,
+     * поля канала в них нет — поэтому шортсы отбираем прямо по длительности,
+     * а вкладку /shorts используем лишь там, где канал известен.
+     */
     suspend fun feed(
         feed: Feed,
         limit: Int,
@@ -186,7 +180,9 @@ object YtDlp {
             val target = if (feed == Feed.CUSTOM) customTarget.trim() else feed.target
             require(target.isNotBlank()) { "Впиши ссылку на канал, плейлист или хэштег." }
 
-            val root = flat(target, cookies, if (feed.viaChannels) 60 else limit * 6)
+            // В ленте шортсы разбавлены длинными роликами, поэтому берём с запасом.
+            val depth = if (feed.needsLogin) minOf(limit * 20, 300) else limit * 6
+            val root = flat(target, cookies, depth)
             val entries = root.optJSONArray("entries")
             if (entries == null || entries.length() == 0) {
                 error(
@@ -195,64 +191,23 @@ object YtDlp {
                 )
             }
 
-            if (!feed.viaChannels) {
-                return@withContext buildList {
-                    for (i in 0 until entries.length()) {
-                        val e = entries.optJSONObject(i) ?: continue
-                        val c = entryToCandidate(e, feed == Feed.HASHTAG) ?: continue
-                        if (c.id !in exclude) add(c)
-                    }
-                }
-            }
-
-            // Собираем каналы из ленты и идём в их вкладку /shorts.
-            // При --flat-playlist YouTube отдаёт разный набор полей, поэтому
-            // пробуем все варианты, вплоть до сборки ссылки из channel_id.
-            val channels = LinkedHashSet<String>()
+            val direct = mutableListOf<Candidate>()
+            var longOnes = 0
             for (i in 0 until entries.length()) {
                 val e = entries.optJSONObject(i) ?: continue
-                val link = listOf("channel_url", "uploader_url", "uploader_id")
-                    .map { e.optString(it) }
-                    .firstOrNull { it.startsWith("http") }
-                    ?: e.optString("channel_id").takeIf { it.startsWith("UC") }
-                        ?.let { "https://www.youtube.com/channel/$it" }
-                    ?: e.optString("uploader_id").takeIf { it.startsWith("@") }
-                        ?.let { "https://www.youtube.com/$it" }
-                if (!link.isNullOrBlank()) channels.add(link.trimEnd('/'))
+                val seconds = e.optInt("duration", -1)
+                if (seconds > MAX_SHORT_SECONDS) { longOnes++; continue }
+                val c = entryToCandidate(e, seconds in 1..MAX_SHORT_SECONDS) ?: continue
+                if (c.id !in exclude && direct.none { it.id == c.id }) direct.add(c)
             }
 
-            // Каналов не нашлось — работаем с самой лентой, вдруг шортсы есть в ней.
-            if (channels.isEmpty()) {
-                val direct = buildList {
-                    for (i in 0 until entries.length()) {
-                        val e = entries.optJSONObject(i) ?: continue
-                        val c = entryToCandidate(e, false) ?: continue
-                        if (c.id !in exclude) add(c)
-                    }
-                }
-                if (direct.isEmpty()) {
-                    error(
-                        "Лента отдала ${entries.length()} записей, но в них нет ни канала, " +
-                            "ни коротких роликов. Похоже, YouTube поменял формат выдачи."
-                    )
-                }
-                return@withContext direct
+            if (direct.isEmpty()) {
+                error(
+                    "В ленте ${entries.length()} роликов, из них длиннее трёх минут $longOnes. " +
+                        "Коротких нет — попробуй ленту #shorts или свою ссылку на канал."
+                )
             }
-
-            val out = mutableListOf<Candidate>()
-            for (channel in channels.shuffled()) {
-                if (out.size >= limit * 3) break
-                runCatching {
-                    val tab = flat("$channel/shorts", cookies, 30)
-                    val items = tab.optJSONArray("entries") ?: return@runCatching
-                    for (i in 0 until items.length()) {
-                        val e = items.optJSONObject(i) ?: continue
-                        val c = entryToCandidate(e, true) ?: continue
-                        if (c.id !in exclude && out.none { it.id == c.id }) out.add(c)
-                    }
-                }
-            }
-            out.shuffled()
+            direct.shuffled()
         }
 
     private fun firstThumb(entry: JSONObject): String? {
@@ -283,9 +238,11 @@ object YtDlp {
     }
 
     /** Вес, размеры кадра и статистика — без скачивания. */
-    suspend fun probe(id: String, cookies: File?): Probe? = withContext(Dispatchers.IO) {
+    suspend fun probe(id: String): Probe? = withContext(Dispatchers.IO) {
         runCatching {
-            val req = request(url(id), cookies).apply {
+            // Без куков: ролики публичные, а с куками YouTube отдаёт
+            // "The page needs to be reloaded" (баг yt-dlp #17389).
+            val req = request(url(id), null).apply {
                 addOption("-f", FORMAT)
                 addOption("--dump-single-json")
                 addOption("--skip-download")
@@ -340,12 +297,11 @@ object YtDlp {
      */
     suspend fun comments(
         id: String,
-        cookies: File?,
         maxTop: Int = 100,
         maxReplies: Int = 10,
     ): List<Comment> = withContext(Dispatchers.IO) {
         runCatching {
-            val req = request(url(id), cookies).apply {
+            val req = request(url(id), null).apply {
                 addOption("--dump-single-json")
                 addOption("--skip-download")
                 addOption("--write-comments")
@@ -397,11 +353,10 @@ object YtDlp {
     suspend fun download(
         id: String,
         dir: File,
-        cookies: File?,
         onProgress: (Float) -> Unit,
     ): File = withContext(Dispatchers.IO) {
         dir.mkdirs()
-        val req = request(url(id), cookies).apply {
+        val req = request(url(id), null).apply {
             addOption("-f", FORMAT)
             addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
             addOption("--no-mtime")

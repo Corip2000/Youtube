@@ -189,7 +189,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 var notVertical = 0
                 for (candidate in pool) {
                     if (picked.size >= wanted) break
-                    val probe = YtDlp.probe(candidate.id, jar)
+                    val probe = YtDlp.probe(candidate.id)
                     _state.update { it.copy(checked = it.checked + 1) }
                     if (probe == null || probe.size <= 0) { noProbe++; continue }
                     if (!probe.isShort) { notShort++; continue }
@@ -243,19 +243,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         jobHandle?.cancel()
         _state.update { it.copy(jobState = JobState.DOWNLOADING, jobMessage = "Качаю…") }
         jobHandle = viewModelScope.launch {
-            val jar = cookies()
             for (candidate in batch) {
                 _state.update {
                     it.copy(currentTitle = candidate.title, currentId = candidate.id, currentProgress = 0f)
                 }
                 runCatching {
-                    val file = YtDlp.download(candidate.id, store.videosDir, jar) { p ->
+                    val file = YtDlp.download(candidate.id, store.videosDir) { p ->
                         _state.update { it.copy(currentProgress = p) }
                     }
                     val thumb = YtDlp.thumbnail(
                         candidate.thumbUrl, File(store.videosDir, "${candidate.id}.jpg")
                     )
-                    val comments = YtDlp.comments(candidate.id, jar)
+                    val comments = YtDlp.comments(candidate.id)
                     val saved = store.save(candidate, file, thumb, comments)
                     _state.update {
                         it.copy(
