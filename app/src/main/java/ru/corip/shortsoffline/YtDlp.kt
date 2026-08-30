@@ -201,6 +201,10 @@ object YtDlp {
         if (id.isBlank() || id.length != 11) return null
         val duration = e.optInt("duration", -1)
         if (duration > MAX_SHORT_SECONDS) return null
+        // Самый надёжный признак: YouTube отдаёт шортсы ссылкой вида
+        // youtube.com/shorts/ID. Длительности в ленте может не быть вовсе.
+        val shortsUrl = e.optString("url").contains("/shorts/") ||
+            e.optString("webpage_url").contains("/shorts/")
         return Candidate(
             id = id,
             title = e.optString("title").ifBlank { id },
@@ -210,7 +214,7 @@ object YtDlp {
             likes = 0,
             commentCount = 0,
             thumbUrl = firstThumb(e),
-            fromShortsFeed = fromShorts,
+            fromShortsFeed = fromShorts || shortsUrl,
         )
     }
 
@@ -414,6 +418,9 @@ object YtDlp {
             addOption("--no-mtime")
             addOption("--concurrent-fragments", "4")
             addOption("--retries", "2")
+            // Последний рубеж: даже если длинный ролик проскочил фильтры,
+            // yt-dlp откажется его качать.
+            addOption("--match-filter", "duration <= $MAX_SHORT_SECONDS")
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
             if (maxTop > 0) {
                 addOption("--write-info-json")

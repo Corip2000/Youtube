@@ -218,8 +218,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
                 if (_state.value.fastSize) {
-                    val quick = pool.take(wanted).map { c ->
-                        c.also { it.size = YtDlp.estimateSize(c.duration) }
+                    // Берём только заведомо короткие: либо ссылка вида /shorts/,
+                    // либо известная длительность до трёх минут. Записи с пустым
+                    // duration раньше проскакивали и оказывались полнометражными.
+                    val sure = pool.filter {
+                        it.duration in 1..YtDlp.MAX_SHORT_SECONDS || it.fromShortsFeed
+                    }
+
+                    // Если явных мало — досматриваем сомнительные обычным способом.
+                    val quick = if (sure.size >= wanted) {
+                        sure.take(wanted)
+                    } else {
+                        val unclear = pool.filter { it !in sure }.take((wanted - sure.size) * 3)
+                        val checked = mutableListOf<Candidate>()
+                        for (chunk in unclear.chunked(4)) {
+                            if (sure.size + checked.size >= wanted) break
+                            val part = coroutineScope {
+                                chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.id) } }
+                                    .awaitAll()
+                            }
+                            for ((c, pr) in part) {
+                                if (pr != null && pr.isShort && pr.size > 0) {
+                                    c.size = pr.size
+                                    checked.add(c)
+                                }
+                            }
+                            _state.update { it.copy(checked = it.checked + chunk.size) }
+                        }
+                        (sure + checked).take(wanted)
+                    }
+
+                    if (quick.isEmpty()) {
+                        error(
+                            "В ленте ${pool.size} записей, но коротких среди них нет. " +
+                                "Возьми ленту #shorts или ссылку вида " +
+                                "youtube.com/@канал/shorts."
+                        )
                     }
                     _state.update {
                         it.copy(
