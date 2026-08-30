@@ -108,12 +108,12 @@ object YtDlp {
     }
 
     /** Один запрос к YouTube, чтобы увидеть живой ответ, а не мои догадки. */
-    suspend fun diagnose(cookies: File?): String = withContext(Dispatchers.IO) {
+    suspend fun diagnose(context: Context, cookies: File?): String = withContext(Dispatchers.IO) {
         val report = StringBuilder()
         report.append(if (cookies != null) "Куки: подключены\n" else "Куки: нет\n")
 
         runCatching {
-            val v = YoutubeDL.getInstance().version(null as Context?)
+            val v = YoutubeDL.getInstance().version(context)
             report.append("Версия yt-dlp: ").append(v ?: "неизвестна").append("\n")
         }.onFailure { report.append("Версию получить не вышло\n") }
 
@@ -128,6 +128,30 @@ object YtDlp {
             }
         }.onFailure {
             report.append("Хэштег #shorts не открылся.\n").append(lastError ?: it.message)
+        }
+
+        // Личные ленты: сколько записей и есть ли в них ссылка на канал.
+        listOf(":ytsubs" to "Подписки", ":ytrec" to "Рекомендации").forEach { (target, label) ->
+            report.append("\n\n").append(label).append(": ")
+            runCatching {
+                val json = flat(target, cookies, 10)
+                val arr = json.optJSONArray("entries")
+                val n = arr?.length() ?: 0
+                report.append("записей ").append(n)
+                if (n > 0) {
+                    val withChannel = (0 until n).count { i ->
+                        val e = arr!!.optJSONObject(i) ?: return@count false
+                        e.optString("channel_url").isNotBlank() ||
+                            e.optString("channel_id").isNotBlank() ||
+                            e.optString("uploader_url").isNotBlank()
+                    }
+                    report.append(", с каналом ").append(withChannel)
+                    report.append("\nполя: ")
+                        .append(arr!!.optJSONObject(0)?.keys()?.asSequence()?.joinToString(","))
+                }
+            }.onFailure {
+                report.append("не открылась\n").append(lastError ?: it.message)
+            }
         }
         report.toString()
     }
@@ -182,11 +206,37 @@ object YtDlp {
             }
 
             // Собираем каналы из ленты и идём в их вкладку /shorts.
+            // При --flat-playlist YouTube отдаёт разный набор полей, поэтому
+            // пробуем все варианты, вплоть до сборки ссылки из channel_id.
             val channels = LinkedHashSet<String>()
             for (i in 0 until entries.length()) {
                 val e = entries.optJSONObject(i) ?: continue
-                val link = e.optString("channel_url").ifBlank { e.optString("uploader_url") }
-                if (link.startsWith("http")) channels.add(link.trimEnd('/'))
+                val link = listOf("channel_url", "uploader_url", "uploader_id")
+                    .map { e.optString(it) }
+                    .firstOrNull { it.startsWith("http") }
+                    ?: e.optString("channel_id").takeIf { it.startsWith("UC") }
+                        ?.let { "https://www.youtube.com/channel/$it" }
+                    ?: e.optString("uploader_id").takeIf { it.startsWith("@") }
+                        ?.let { "https://www.youtube.com/$it" }
+                if (!link.isNullOrBlank()) channels.add(link.trimEnd('/'))
+            }
+
+            // Каналов не нашлось — работаем с самой лентой, вдруг шортсы есть в ней.
+            if (channels.isEmpty()) {
+                val direct = buildList {
+                    for (i in 0 until entries.length()) {
+                        val e = entries.optJSONObject(i) ?: continue
+                        val c = entryToCandidate(e, false) ?: continue
+                        if (c.id !in exclude) add(c)
+                    }
+                }
+                if (direct.isEmpty()) {
+                    error(
+                        "Лента отдала ${entries.length()} записей, но в них нет ни канала, " +
+                            "ни коротких роликов. Похоже, YouTube поменял формат выдачи."
+                    )
+                }
+                return@withContext direct
             }
 
             val out = mutableListOf<Candidate>()

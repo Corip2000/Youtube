@@ -135,7 +135,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun runDiagnostics() = viewModelScope.launch {
         _state.update { it.copy(diagnostics = "Проверяю…") }
-        val report = YtDlp.diagnose(cookies())
+        val report = YtDlp.diagnose(getApplication(), cookies())
         _state.update { it.copy(diagnostics = report) }
     }
 
