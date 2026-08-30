@@ -125,101 +125,18 @@ object YtDlp {
     // ------------------------------------------------------------------ ленты
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
-        // Рекомендации и лента подписок убраны: они состоят из обычных видео,
-        // шортсов там единицы, а поиск по ним долгий и почти всегда пустой.
-        // Личную ленту шортсов даёт отдельная кнопка в главном меню.
-        SUBS_SHORTS(":ytsubs://user/", "Шортсы моих подписок", true),
-        LIKED(":ytfav", "Понравившиеся", true),
-        HISTORY(":ythistory", "История", true),
-        HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false),
+        // Всё, что требовало входа, убрано: сессия через WebView не создаётся,
+        // Google её блокирует. Остались источники, работающие без входа —
+        // и они отдают только вертикальные ролики.
+        HASHTAG("https://www.youtube.com/hashtag/shorts", "Хэштег #shorts", false),
         CUSTOM("", "Своя ссылка", false),
     }
 
     /**
-     * Список роликов из ленты без захода в каждый — быстро.
-     * Длинные отсекаем сразу, вертикальность выяснит [probe].
+     * Поиск с фильтром «Шортсы» (параметр sp). YouTube отдаёт только
+     * вертикальные ролики, вход не нужен, тема каждый раз новая —
+     * это и даёт ощущение случайной ленты.
      */
-    private fun flat(target: String, cookies: File?, limit: Int): JSONObject {
-        val req = request(target, cookies).apply {
-            addOption("--flat-playlist")
-            addOption("--dump-single-json")
-            addOption("--playlist-end", limit.toString())
-        }
-        return parse(run(req))
-    }
-
-    /** Один запрос к YouTube, чтобы увидеть живой ответ, а не мои догадки. */
-    suspend fun diagnose(context: Context, cookies: File?): String = withContext(Dispatchers.IO) {
-        val report = StringBuilder()
-        report.append(if (cookies != null) "Куки: подключены\n" else "Куки: нет\n")
-        report.append(if (ffmpegReady) "ffmpeg: готов\n" else "ffmpeg: НЕ поднялся\n")
-
-        runCatching {
-            val v = YoutubeDL.getInstance().version(context)
-            report.append("Версия yt-dlp: ").append(v ?: "неизвестна").append("\n")
-        }.onFailure { report.append("Версия yt-dlp: не определилась (нажми «Обновить yt-dlp»)\n") }
-
-        report.append("\n")
-        runCatching {
-            val json = flat("https://www.youtube.com/hashtag/shorts", cookies, 3)
-            val n = json.optJSONArray("entries")?.length() ?: 0
-            report.append("Хэштег #shorts: получено роликов ").append(n)
-            if (n > 0) {
-                report.append("\nПервый: ")
-                    .append(json.optJSONArray("entries")?.optJSONObject(0)?.optString("title"))
-            }
-        }.onFailure {
-            report.append("Хэштег #shorts не открылся.\n").append(lastError ?: it.message)
-        }
-
-        // Личные ленты: сколько записей и есть ли в них ссылка на канал.
-        listOf(":ytsubs" to "Подписки", ":ytrec" to "Рекомендации").forEach { (target, label) ->
-            report.append("\n\n").append(label).append(": ")
-            runCatching {
-                val json = flat(target, cookies, 10)
-                val arr = json.optJSONArray("entries")
-                val n = arr?.length() ?: 0
-                report.append("записей ").append(n)
-                if (n > 0) {
-                    val withChannel = (0 until n).count { i ->
-                        val e = arr!!.optJSONObject(i) ?: return@count false
-                        e.optString("channel_url").isNotBlank() ||
-                            e.optString("channel_id").isNotBlank() ||
-                            e.optString("uploader_url").isNotBlank()
-                    }
-                    report.append(", с каналом ").append(withChannel)
-                    report.append("\nполя: ")
-                        .append(arr!!.optJSONObject(0)?.keys()?.asSequence()?.joinToString(","))
-                }
-            }.onFailure {
-                report.append("не открылась\n").append(lastError ?: it.message)
-            }
-        }
-        report.toString()
-    }
-
-    private fun entryToCandidate(e: JSONObject, fromShorts: Boolean): Candidate? {
-        val id = e.optString("id")
-        if (id.isBlank() || id.length != 11) return null
-        val duration = e.optInt("duration", -1)
-        if (duration > MAX_SHORT_SECONDS) return null
-        // Самый надёжный признак: YouTube отдаёт шортсы ссылкой вида
-        // youtube.com/shorts/ID. Длительности в ленте может не быть вовсе.
-        val shortsUrl = e.optString("url").contains("/shorts/") ||
-            e.optString("webpage_url").contains("/shorts/")
-        return Candidate(
-            id = id,
-            title = e.optString("title").ifBlank { id },
-            channel = e.optString("channel").ifBlank { e.optString("uploader") },
-            duration = if (duration > 0) duration else 0,
-            views = e.optLong("view_count"),
-            likes = 0,
-            commentCount = 0,
-            thumbUrl = firstThumb(e),
-            fromShortsFeed = fromShorts || shortsUrl,
-        )
-    }
-
     /**
      * Список роликов из ленты. Личные ленты отдают только id/title/duration,
      * поля канала в них нет — поэтому шортсы отбираем прямо по длительности,
@@ -233,7 +150,10 @@ object YtDlp {
         customTarget: String = "",
     ): List<Candidate> =
         withContext(Dispatchers.IO) {
-            val target = if (feed == Feed.CUSTOM) customTarget.trim() else feed.target
+            val target = when (feed) {
+                Feed.CUSTOM -> customTarget.trim()
+                else -> feed.target
+            }
             require(target.isNotBlank()) { "Впиши ссылку на канал, плейлист или хэштег." }
 
             // В ленте шортсы разбавлены длинными роликами, поэтому берём с запасом.
@@ -245,46 +165,6 @@ object YtDlp {
                     "yt-dlp открыл \"" + root.optString("title").ifBlank { target } + "\", " +
                         "но роликов там нет (тип: " + root.optString("_type").ifBlank { "?" } + ")."
                 )
-            }
-
-            // Подписки как список каналов: заходим прямо в раздел /shorts
-            // каждого. Там всё вертикальное, проверять нечего — отсюда и скорость.
-            if (feed == Feed.SUBS_SHORTS) {
-                val channels = LinkedHashSet<String>()
-                for (i in 0 until entries.length()) {
-                    val e = entries.optJSONObject(i) ?: continue
-                    val link = listOf("url", "channel_url", "uploader_url")
-                        .map { e.optString(it) }
-                        .firstOrNull { it.contains("/channel/") || it.contains("youtube.com/@") }
-                    if (link != null) channels.add(link.trimEnd('/').substringBefore("/videos"))
-                }
-                if (channels.isEmpty()) {
-                    error(
-                        "Список подписок пуст. Проверь вход — без сессии YouTube " +
-                            "каналов не покажет."
-                    )
-                }
-
-                val out = mutableListOf<Candidate>()
-                for (channel in channels.shuffled()) {
-                    if (out.size >= limit * 2) break
-                    runCatching {
-                        val tab = flat("$channel/shorts", cookies, 20)
-                        val items = tab.optJSONArray("entries") ?: return@runCatching
-                        for (i in 0 until items.length()) {
-                            val e = items.optJSONObject(i) ?: continue
-                            val c = entryToCandidate(e, true) ?: continue
-                            if (c.id !in exclude && out.none { it.id == c.id }) out.add(c)
-                        }
-                    }
-                }
-                if (out.isEmpty()) {
-                    error(
-                        "Прошёл по ${channels.size} каналам из подписок, " +
-                            "но шортсов у них нет."
-                    )
-                }
-                return@withContext out.shuffled()
             }
 
             // Хэштег #shorts и вкладка /shorts отдают только вертикальные ролики —

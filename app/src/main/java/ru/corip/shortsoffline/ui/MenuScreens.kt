@@ -67,52 +67,11 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Качает шортсы вместе с комментами. Смотришь без сети — просмотренное стирается.",
+            "Качает случайные шортсы вместе с комментами. Смотришь без сети — просмотренное стирается.",
             style = Type.Small,
         )
 
         Spacer(Modifier.height(24.dp))
-
-        // ---------- аккаунт ----------
-        Panel {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(19.dp))
-                        .background(if (state.signedIn) Palette.Signal else Palette.PanelHi),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (state.signedIn) "\u25B6" else "?",
-                        style = Type.Data.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = if (state.signedIn) Color(0xFF180A10) else Palette.Ink,
-                        ),
-                    )
-                }
-                Column(Modifier.padding(start = 12.dp)) {
-                    Text(
-                        if (state.signedIn) "YouTube подключён" else "Вход не выполнен",
-                        style = Type.Data.copy(fontWeight = FontWeight.SemiBold),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        if (state.signedIn) "Твои ленты доступны"
-                        else "Без входа только «В тренде»",
-                        style = Type.Label,
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            if (state.signedIn) {
-                AppButton("Выйти и стереть сессию") { vm.signOut() }
-            } else {
-                AppButton("Войти в YouTube", primary = true) { vm.openLogin() }
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
 
         // ---------- место ----------
         Panel {
@@ -137,15 +96,13 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
 
         Spacer(Modifier.height(24.dp))
 
-        AppButton("Скачать шортсы", tail = "выбрать количество", primary = true) {
-            vm.go(Screen.DOWNLOAD)
+        AppButton("Моя лента шортсов", tail = "своя, скачается сама", primary = true) {
+            vm.openFeed()
         }
         Spacer(Modifier.height(10.dp))
-        AppButton(
-            "Моя лента шортсов",
-            tail = "личная, собирается сама",
-            primary = state.signedIn,
-        ) { vm.openShortsPicker() }
+        AppButton("Другие источники", tail = "хэштег, свой канал") {
+            vm.go(Screen.DOWNLOAD)
+        }
         Spacer(Modifier.height(10.dp))
         AppButton(
             "Смотреть шортсы",
@@ -286,10 +243,9 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
                 )
             }
             YtDlp.Feed.entries.forEach { feed ->
-                val locked = feed.needsLogin && !state.signedIn
                 Box(Modifier.padding(bottom = 8.dp)) {
                     SegButton(
-                        label = feed.title + if (locked) "  \u00B7 нужен вход" else "",
+                        label = feed.title,
                         active = state.feed == feed,
                         modifier = Modifier.fillMaxWidth(),
                     ) { vm.setFeed(feed) }

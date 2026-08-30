@@ -19,11 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.corip.shortsoffline.ui.DownloadScreen
-import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
 import ru.corip.shortsoffline.ui.PlayerScreen
-import ru.corip.shortsoffline.ui.ShortsPickerScreen
+import ru.corip.shortsoffline.ui.ShortsFeedScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
 
 class MainActivity : ComponentActivity() {
@@ -50,7 +49,6 @@ private fun App(vm: AppViewModel = viewModel()) {
         when {
             state.commentsOpen -> vm.closeComments()
             state.screen == Screen.PLAYER -> vm.exitPlayer()
-            state.screen == Screen.LOGIN -> vm.finishLogin()
             else -> vm.go(Screen.MENU)
         }
     }
@@ -62,11 +60,7 @@ private fun App(vm: AppViewModel = viewModel()) {
     ) {
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
-            Screen.LOGIN -> LoginScreen(
-                onDone = { vm.finishLogin() },
-                onImport = { vm.importCookies(it) },
-            )
-            Screen.SHORTS_PICKER -> ShortsPickerScreen(
+            Screen.FEED -> ShortsFeedScreen(
                 collected = state.collected,
                 target = state.count,
                 onCollect = { vm.collectShort(it) },

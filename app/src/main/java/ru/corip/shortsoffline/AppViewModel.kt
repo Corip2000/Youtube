@@ -17,13 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, SHORTS_PICKER, DOWNLOAD, PLAYER }
+enum class Screen { MENU, FEED, DOWNLOAD, PLAYER }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
     val screen: Screen = Screen.MENU,
 
-    val signedIn: Boolean = false,
 
     val savedCount: Int = 0,
     val savedBytes: Long = 0,
@@ -34,7 +33,7 @@ data class UiState(
     val sessionFreed: Long = 0,
     val showReceipt: Boolean = false,
 
-    val feed: YtDlp.Feed = YtDlp.Feed.SUBS_SHORTS,
+    val feed: YtDlp.Feed = YtDlp.Feed.HASHTAG,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
     val jobMessage: String = "",
@@ -77,16 +76,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var jobHandle: Job? = null
     private val watched = mutableSetOf<String>()
 
-    /** Файл с куками, если вход выполнен. */
-    private fun cookies(): File? =
-        Cookies.file(getApplication()).takeIf { Cookies.isSignedIn(getApplication()) }
-
     init {
-        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.SUBS_SHORTS)
+        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.HASHTAG)
         _state.update {
             it.copy(
                 feed = saved,
-                signedIn = Cookies.isSignedIn(app),
                 customUrl = store.customTarget,
                 commentDepth = store.commentDepth,
                 fastSize = store.fastSize,
@@ -107,34 +101,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ------------------------------------------------------------ вход
+    // ------------------------------------------------------------ моя лента
 
-    fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }
+    fun openFeed() = _state.update {
+        it.copy(screen = Screen.FEED, collected = emptyList())
+    }
 
-    /** Вызывается, когда пользователь закрывает окно входа. */
-    fun finishLogin() {
-        val saved = Cookies.captureFromWebView(getApplication())
-        val ok = Cookies.isSignedIn(getApplication())
+    fun collectShort(id: String) = _state.update {
+        if (id in it.collected) it else it.copy(collected = it.collected + id)
+    }
+
+    /**
+     * Собранное из живой ленты сразу готово к загрузке: это шортсы по
+     * определению, проверять нечего. Скачивание запускается само.
+     */
+    fun useCollected() {
+        val ids = _state.value.collected.filter { it !in store.ids() }
+        if (ids.isEmpty()) {
+            _state.update { it.copy(screen = Screen.MENU, toast = "Всё это уже скачано.") }
+            return
+        }
+        val found = ids.take(_state.value.count).map { id ->
+            Candidate(
+                id = id, title = "Шортс", channel = "", duration = 0,
+                views = 0, likes = 0, commentCount = 0, thumbUrl = null,
+                fromShortsFeed = true,
+            ).also { it.size = YtDlp.estimateSize(30) }
+        }
         _state.update {
             it.copy(
-                screen = Screen.MENU,
-                signedIn = ok,
-                toast = if (ok) "Вход выполнен, сохранено $saved куки"
-                else "Сессия не найдена — похоже, вход не завершён",
+                screen = Screen.DOWNLOAD,
+                found = found,
+                foundBytes = found.sumOf { c -> c.size },
+                jobState = JobState.READY,
+                jobMessage = "Из твоей ленты: ${found.size}",
+                downloaded = 0, downloadedBytes = 0, skipped = 0, downloadError = null,
             )
         }
-    }
-
-    fun signOut() {
-        Cookies.signOut(getApplication())
-        _state.update { it.copy(signedIn = false, toast = "Сессия удалена") }
-    }
-
-    fun importCookies(text: String) {
-        val ok = Cookies.import(getApplication(), text)
-        _state.update {
-            it.copy(signedIn = ok, toast = if (ok) "Куки приняты" else "В файле нет сессии YouTube")
-        }
+        startDownload()
     }
 
     fun updateYtdlp() = viewModelScope.launch {
@@ -157,44 +161,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun setCustomUrl(value: String) {
         store.customTarget = value
         _state.update { it.copy(customUrl = value) }
-    }
-
-    fun openShortsPicker() {
-        if (!_state.value.signedIn) {
-            _state.update { it.copy(toast = "Сначала импортируй cookies.txt — без сессии лента будет чужой.") }
-            return
-        }
-        _state.update { it.copy(screen = Screen.SHORTS_PICKER, collected = emptyList()) }
-    }
-
-    fun collectShort(id: String) = _state.update {
-        if (id in it.collected) it else it.copy(collected = it.collected + id)
-    }
-
-    /** Собранные из живой ленты — сразу готовы к загрузке, проверять нечего. */
-    fun useCollected() {
-        val ids = _state.value.collected.filter { it !in store.ids() }
-        if (ids.isEmpty()) {
-            _state.update { it.copy(screen = Screen.DOWNLOAD, toast = "Всё это уже скачано.") }
-            return
-        }
-        val found = ids.map { id ->
-            Candidate(
-                id = id, title = "Шортс $id", channel = "", duration = 0,
-                views = 0, likes = 0, commentCount = 0, thumbUrl = null,
-                fromShortsFeed = true,
-            ).also { it.size = YtDlp.estimateSize(30) }
-        }
-        _state.update {
-            it.copy(
-                screen = Screen.DOWNLOAD,
-                found = found,
-                foundBytes = found.sumOf { c -> c.size },
-                jobState = JobState.READY,
-                jobMessage = "Из твоей ленты: ${found.size} шортсов",
-                downloaded = 0, downloadedBytes = 0, skipped = 0, downloadError = null,
-            )
-        }
     }
 
     fun setFastSize(value: Boolean) {
@@ -230,10 +196,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun find() {
         val feed = _state.value.feed
-        if (feed.needsLogin && !_state.value.signedIn) {
-            _state.update { it.copy(toast = "Для ленты «${feed.title}» нужен вход в YouTube.") }
-            return
-        }
         jobHandle?.cancel()
         _state.update {
             it.copy(
@@ -246,8 +208,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         jobHandle = viewModelScope.launch {
             runCatching {
                 val wanted = _state.value.count
-                val jar = cookies()
-                val pool = YtDlp.feed(feed, wanted, jar, store.ids(), _state.value.customUrl)
+                val pool = YtDlp.feed(feed, wanted, null, store.ids(), _state.value.customUrl)
                 if (pool.isEmpty()) {
                     error(
                         if (feed.needsLogin)
