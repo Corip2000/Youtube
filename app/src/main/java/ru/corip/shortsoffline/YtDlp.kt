@@ -288,6 +288,14 @@ object YtDlp {
     }
 
     /** Вес, размеры кадра и статистика — без скачивания. */
+    /**
+     * Прикидка веса по длительности: шортсы YouTube отдаёт примерно на 2 Мбит/с.
+     * Ошибка обычно в пределах трети, зато не нужен запрос на каждый ролик —
+     * а именно эти запросы и делали поиск таким долгим.
+     */
+    fun estimateSize(durationSeconds: Int): Long =
+        (durationSeconds.coerceAtLeast(1) * 250_000L)
+
     suspend fun probe(id: String): Probe? = withContext(Dispatchers.IO) {
         runCatching {
             // Без куков: ролики публичные, а с куками YouTube отдаёт

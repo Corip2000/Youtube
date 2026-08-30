@@ -317,6 +317,29 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
         Spacer(Modifier.height(12.dp))
 
         Panel {
+            Text("ВЕС ДО ЗАГРУЗКИ", style = Type.Label)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SegButton("Примерный \u00B7 быстро", state.fastSize, Modifier.weight(1f)) {
+                    vm.setFastSize(true)
+                }
+                SegButton("Точный \u00B7 долго", !state.fastSize, Modifier.weight(1f)) {
+                    vm.setFastSize(false)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (state.fastSize)
+                    "Считается по длительности, без запроса к каждому ролику. " +
+                        "Ошибка обычно в пределах трети."
+                else "Точный размер, но приложение опрашивает каждый ролик отдельно.",
+                style = Type.Small,
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Panel {
             Text("КОММЕНТАРИИ", style = Type.Label)
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -436,7 +459,8 @@ private fun JobPanel(state: UiState, vm: AppViewModel) {
                 Spacer(Modifier.height(10.dp))
                 Text(
                     "${state.downloaded} из ${state.found.size} · " +
-                        "на диск легло ${formatBytes(state.downloadedBytes)}",
+                        "на диск легло ${formatBytes(state.downloadedBytes)}" +
+                        if (state.running > 1) " · в ${state.running} потока" else "",
                     style = Type.Small,
                 )
             }

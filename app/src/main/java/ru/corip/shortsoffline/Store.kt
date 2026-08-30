@@ -73,6 +73,11 @@ class Store(context: Context) {
 
     /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
     /** Сколько комментариев тянуть: 100, 30 или 0 (не тянуть вовсе). */
+    /** Быстрый поиск: вес прикидываем по длительности, не опрашивая каждый ролик. */
+    var fastSize: Boolean
+        get() = prefs.getBoolean("fast_size", true)
+        set(v) = prefs.edit().putBoolean("fast_size", v).apply()
+
     var commentDepth: Int
         get() = prefs.getInt("comment_depth", 30)
         set(v) = prefs.edit().putInt("comment_depth", v).apply()

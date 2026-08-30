@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,6 +57,8 @@ data class UiState(
 
     val customUrl: String = "",
     val commentDepth: Int = 30,
+    val fastSize: Boolean = true,
+    val running: Int = 0,
     val diagnostics: String? = null,
     val ytdlpVersion: String? = null,
     val toast: String? = null,
@@ -85,6 +88,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 signedIn = Cookies.isSignedIn(app),
                 customUrl = store.customTarget,
                 commentDepth = store.commentDepth,
+                fastSize = store.fastSize,
             )
         }
         refreshStorage()
@@ -154,6 +158,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(customUrl = value) }
     }
 
+    fun setFastSize(value: Boolean) {
+        store.fastSize = value
+        _state.update { it.copy(fastSize = value) }
+    }
+
     fun setCommentDepth(value: Int) {
         store.commentDepth = value
         _state.update { it.copy(commentDepth = value) }
@@ -206,6 +215,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             "Лента пустая — обычно это значит, что сессия YouTube не подхватилась. Проверь вход."
                         else "Лента пустая. Попробуй ещё раз."
                     )
+                }
+
+                if (_state.value.fastSize) {
+                    val quick = pool.take(wanted).map { c ->
+                        c.also { it.size = YtDlp.estimateSize(c.duration) }
+                    }
+                    _state.update {
+                        it.copy(
+                            found = quick,
+                            foundBytes = quick.sumOf { c -> c.size },
+                            jobState = JobState.READY,
+                            jobMessage = "Нашёл ${quick.size} шортсов · вес примерный",
+                        )
+                    }
+                    return@runCatching
                 }
 
                 _state.update { it.copy(jobMessage = "Считаю вес…", toCheck = pool.size) }
@@ -281,36 +305,52 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         jobHandle?.cancel()
         _state.update { it.copy(jobState = JobState.DOWNLOADING, jobMessage = "Качаю…") }
         jobHandle = viewModelScope.launch {
-            for (candidate in batch) {
+            val depth = _state.value.commentDepth
+            // Три потока: узкое место — не полоса, а запуск yt-dlp, разбор
+            // страницы и расшифровка ссылки. Такая работа ждёт сеть и процессор,
+            // поэтому параллельно идёт почти втрое быстрее.
+            for (group in batch.chunked(3)) {
+                if (!isActive) break
                 _state.update {
-                    it.copy(currentTitle = candidate.title, currentId = candidate.id, currentProgress = 0f)
-                }
-                runCatching {
-                    val depth = _state.value.commentDepth
-                    val result = YtDlp.download(
-                        candidate.id, store.videosDir,
-                        maxTop = depth,
-                        maxReplies = if (depth >= 100) 10 else 5,
-                    ) { p -> _state.update { it.copy(currentProgress = p) } }
-                    val thumb = YtDlp.thumbnail(
-                        candidate.thumbUrl, File(store.videosDir, "${candidate.id}.jpg")
+                    it.copy(
+                        running = group.size,
+                        currentTitle = group.first().title,
+                        currentProgress = 0f,
                     )
-                    val saved = store.save(candidate, result.file, thumb, result.comments)
-                    _state.update {
-                        it.copy(
-                            downloaded = it.downloaded + 1,
-                            downloadedBytes = it.downloadedBytes + saved.bytes,
-                        )
-                    }
-                }.onFailure { e ->
-                    // Показываем первую настоящую причину, а не молчаливый счётчик.
-                    val detail = YtDlp.lastError ?: e.message ?: e.toString()
-                    _state.update { s ->
-                        s.copy(
-                            skipped = s.skipped + 1,
-                            downloadError = s.downloadError ?: detail,
-                        )
-                    }
+                }
+                coroutineScope {
+                    group.map { candidate ->
+                        async(Dispatchers.IO) {
+                            runCatching {
+                                val result = YtDlp.download(
+                                    candidate.id, store.videosDir,
+                                    maxTop = depth,
+                                    maxReplies = if (depth >= 100) 10 else 5,
+                                ) { }
+                                val thumb = YtDlp.thumbnail(
+                                    candidate.thumbUrl,
+                                    File(store.videosDir, "${candidate.id}.jpg"),
+                                )
+                                val saved = store.save(candidate, result.file, thumb, result.comments)
+                                _state.update {
+                                    it.copy(
+                                        downloaded = it.downloaded + 1,
+                                        downloadedBytes = it.downloadedBytes + saved.bytes,
+                                        currentProgress =
+                                            (it.downloaded + 1f) / batch.size.coerceAtLeast(1),
+                                    )
+                                }
+                            }.onFailure { e ->
+                                val detail = YtDlp.lastError ?: e.message ?: e.toString()
+                                _state.update { s ->
+                                    s.copy(
+                                        skipped = s.skipped + 1,
+                                        downloadError = s.downloadError ?: detail,
+                                    )
+                                }
+                            }
+                        }
+                    }.awaitAll()
                 }
                 refreshStorage()
             }
@@ -319,7 +359,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (it.skipped > 0) " · пропущено ${it.skipped}" else ""
                 it.copy(
                     jobState = if (it.downloaded == 0 && it.skipped > 0) JobState.FAILED else JobState.DONE,
-                    currentTitle = null, currentId = null,
+                    currentTitle = null, currentId = null, running = 0,
                     jobMessage = base + (it.downloadError?.let { d -> "\n\nyt-dlp сказал: $d" } ?: ""),
                 )
             }
