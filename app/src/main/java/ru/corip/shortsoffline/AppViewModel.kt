@@ -34,7 +34,7 @@ data class UiState(
     val sessionFreed: Long = 0,
     val showReceipt: Boolean = false,
 
-    val feed: YtDlp.Feed = YtDlp.Feed.RECOMMENDED,
+    val feed: YtDlp.Feed = YtDlp.Feed.SUBS_SHORTS,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
     val jobMessage: String = "",
@@ -82,7 +82,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         Cookies.file(getApplication()).takeIf { Cookies.isSignedIn(getApplication()) }
 
     init {
-        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
+        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.SUBS_SHORTS)
         _state.update {
             it.copy(
                 feed = saved,

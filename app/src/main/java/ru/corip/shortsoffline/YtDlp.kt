@@ -125,9 +125,10 @@ object YtDlp {
     // ------------------------------------------------------------------ ленты
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
-        RECOMMENDED(":ytrec", "Рекомендации", true),
+        // Рекомендации и лента подписок убраны: они состоят из обычных видео,
+        // шортсов там единицы, а поиск по ним долгий и почти всегда пустой.
+        // Личную ленту шортсов даёт отдельная кнопка в главном меню.
         SUBS_SHORTS(":ytsubs://user/", "Шортсы моих подписок", true),
-        SUBSCRIPTIONS(":ytsubs", "Лента подписок", true),
         LIKED(":ytfav", "Понравившиеся", true),
         HISTORY(":ythistory", "История", true),
         HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false),

@@ -143,7 +143,8 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         Spacer(Modifier.height(10.dp))
         AppButton(
             "Моя лента шортсов",
-            tail = "листать и качать",
+            tail = "личная, собирается сама",
+            primary = state.signedIn,
         ) { vm.openShortsPicker() }
         Spacer(Modifier.height(10.dp))
         AppButton(
