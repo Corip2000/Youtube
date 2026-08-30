@@ -1,5 +1,9 @@
 package ru.corip.shortsoffline.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +35,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -54,7 +60,33 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
     var progress by remember { mutableFloatStateOf(0f) }
     var holding by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) { onDispose { player.release() } }
+    val activity = context.findActivity()
+
+    // Приложение заперто в вертикальном положении, а тут нужен поворот.
+    // Снимаем замок на время просмотра и возвращаем при выходе.
+    DisposableEffect(Unit) {
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        onDispose {
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            player.release()
+        }
+    }
+
+    // Горизонтальное видео сразу разворачиваем набок, вертикальное оставляем
+    // стоймя. Дальше телефон слушается поворота как обычно.
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                if (videoSize.width == 0 || videoSize.height == 0) return
+                activity?.requestedOrientation =
+                    if (videoSize.width > videoSize.height)
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
 
     LaunchedEffect(uri) {
         player.setMediaItem(MediaItem.fromUri(uri))
@@ -171,4 +203,14 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
                 .padding(bottom = 28.dp),
         )
     }
+}
+
+/** Activity лежит под слоями обёрток — достаём её оттуда. */
+private fun Context.findActivity(): Activity? {
+    var current: Context = this
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
 }
