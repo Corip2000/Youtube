@@ -44,10 +44,12 @@ import androidx.compose.ui.unit.sp
 import ru.corip.shortsoffline.AppViewModel
 import ru.corip.shortsoffline.JobState
 import ru.corip.shortsoffline.Screen
+import ru.corip.shortsoffline.Tab
 import ru.corip.shortsoffline.UiState
 import ru.corip.shortsoffline.YtDlp
 import ru.corip.shortsoffline.formatBytes
 import ru.corip.shortsoffline.formatDuration
+
 
 @Composable
 fun MenuScreen(state: UiState, vm: AppViewModel) {
@@ -70,89 +72,26 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
             Text("Shorts", style = Type.Display)
             Text("Offline", style = Type.Display.copy(color = Palette.Muted))
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "Качает шортсы вместе с комментами. Смотришь без сети, удаляешь двойным нажатием.",
-            style = Type.Small,
-        )
-
-        Spacer(Modifier.height(24.dp))
-
-        // ---------- место ----------
-        Panel {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("ХРАНИЛИЩЕ", style = Type.Label)
-                Text(
-                    "${formatBytes(state.savedBytes)} / ${formatBytes(state.freeSpace)} свободно",
-                    style = Type.Small,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            StorageMeter(state.savedBytes, state.sessionFreed, state.freeSpace)
-            Spacer(Modifier.height(9.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                LegendDot(Palette.Signal, "${state.savedCount} видео")
-                LegendDot(Palette.Jade, "освобождено ${formatBytes(state.sessionFreed)}")
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-
-        AppButton("Вход в YouTube", tail = "один раз") { vm.openLogin() }
-        Spacer(Modifier.height(10.dp))
-        AppButton(
-            "Скачать шортсы",
-            tail = "из твоих рекомендаций",
-            primary = true,
-        ) { vm.go(Screen.DOWNLOAD) }
-        Spacer(Modifier.height(10.dp))
-        AppButton("Видео по ссылке", tail = "в галерею") { vm.openLink() }
-        Spacer(Modifier.height(10.dp))
-        AppButton("Открыть видео с телефона", tail = "посмотреть тут") {
-            picker.launch(arrayOf("video/*"))
-        }
-        Spacer(Modifier.height(10.dp))
-        AppButton(
-            "Смотреть шортсы",
-            tail = if (state.savedCount > 0)
-                "${state.savedCount} в очереди · ${formatBytes(state.savedBytes)}" else "пусто",
-            enabled = state.savedCount > 0,
-        ) { vm.openPlayer() }
 
         Spacer(Modifier.height(20.dp))
-        Text(
-            "yt-dlp: " + (state.ytdlpVersion ?: "не обновлён — нажми «Обновить yt-dlp»"),
-            style = Type.Small.copy(
-                color = if (state.ytdlpVersion == null) Palette.Signal else Palette.Jade
-            ),
-        )
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "За всё время: скачано ${state.lifetime.downloaded} · " +
-                "удалено ${state.lifetime.deleted} · " +
-                "освобождено ${formatBytes(state.lifetime.freed)}",
-            style = Type.Small,
-        )
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(
-                "Обновить yt-dlp",
-                style = Type.Small.copy(color = Palette.Muted),
-                modifier = Modifier.clickable { vm.updateYtdlp() },
-            )
-            Text(
-                "Проверить связь",
-                style = Type.Small.copy(color = Palette.Jade),
-                modifier = Modifier.clickable { vm.runDiagnostics() },
-            )
-            Text(
-                "Стереть всё",
-                style = Type.Small.copy(color = Palette.Signal),
-                modifier = Modifier.clickable { confirmClear = true },
-            )
+
+        // Вкладки: слева всё про файлы, справа две площадки со своими лентами.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Tab.entries.forEach { tab ->
+                Box(Modifier.weight(1f)) {
+                    SegButton(tab.title, state.tab == tab, Modifier.fillMaxWidth()) {
+                        vm.setTab(tab)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(18.dp))
+
+        when (state.tab) {
+            Tab.VIDEO -> VideoTab(state, vm, picker) { confirmClear = true }
+            Tab.YOUTUBE -> PlatformTab(state, vm, YtDlp.Platform.YOUTUBE)
+            Tab.TIKTOK -> PlatformTab(state, vm, YtDlp.Platform.TIKTOK)
         }
     }
 
@@ -160,7 +99,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         AlertDialog(
             onDismissRequest = { vm.dismissDiagnostics() },
             containerColor = Palette.Panel,
-            title = { Text("Что ответил YouTube", style = Type.Data) },
+            title = { Text("Что ответил сервис", style = Type.Data) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text(report, style = Type.Small.copy(color = Palette.Ink))
@@ -183,7 +122,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
             title = { Text("Стереть хранилище?", style = Type.Data) },
             text = {
                 Text(
-                    "Удалятся все ${state.savedCount} скачанных шортсов " +
+                    "Удалятся все ${state.savedCount} скачанных роликов " +
                         "(${formatBytes(state.savedBytes)}).",
                     style = Type.Small,
                 )
@@ -206,7 +145,115 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
     }
 }
 
-// ---------------------------------------------------------------- загрузка
+/** Вкладка «Видео»: скачать по ссылке, открыть свой файл, смотреть скачанное. */
+@Composable
+private fun VideoTab(
+    state: UiState,
+    vm: AppViewModel,
+    picker: androidx.activity.result.ActivityResultLauncher<Array<String>>,
+    onClear: () -> Unit,
+) {
+    AppButton("Скачать по ссылке", tail = "в галерею", primary = true) { vm.openLink() }
+    Spacer(Modifier.height(10.dp))
+    AppButton("Открыть видео с телефона", tail = "посмотреть тут") {
+        picker.launch(arrayOf("video/*"))
+    }
+    Spacer(Modifier.height(10.dp))
+    AppButton(
+        "Смотреть скачанное",
+        tail = if (state.savedCount > 0)
+            "${state.savedCount} · ${formatBytes(state.savedBytes)}" else "пусто",
+        enabled = state.savedCount > 0,
+    ) { vm.openPlayer() }
+
+    Spacer(Modifier.height(16.dp))
+
+    Panel {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("ХРАНИЛИЩЕ", style = Type.Label)
+            Text(
+                "${formatBytes(state.savedBytes)} / ${formatBytes(state.freeSpace)} свободно",
+                style = Type.Small,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        StorageMeter(state.savedBytes, state.sessionFreed, state.freeSpace)
+        Spacer(Modifier.height(9.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            LegendDot(Palette.Signal, "${state.savedCount} видео")
+            LegendDot(Palette.Jade, "освобождено ${formatBytes(state.sessionFreed)}")
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+    Text(
+        "По ссылке качаются YouTube, TikTok, Rutube и VK Видео. " +
+            "Файл попадает в галерею, без лайков и комментариев.",
+        style = Type.Small,
+    )
+
+    Spacer(Modifier.height(16.dp))
+    Text(
+        "yt-dlp: " + (state.ytdlpVersion ?: "не обновлён"),
+        style = Type.Small.copy(
+            color = if (state.ytdlpVersion == null) Palette.Signal else Palette.Jade
+        ),
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        "За всё время: скачано ${state.lifetime.downloaded} · " +
+            "удалено ${state.lifetime.deleted} · " +
+            "освобождено ${formatBytes(state.lifetime.freed)}",
+        style = Type.Small,
+    )
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text(
+            "Обновить yt-dlp",
+            style = Type.Small.copy(color = Palette.Muted),
+            modifier = Modifier.clickable { vm.updateYtdlp() },
+        )
+        Text(
+            "Проверить связь",
+            style = Type.Small.copy(color = Palette.Muted),
+            modifier = Modifier.clickable { vm.runDiagnostics() },
+        )
+        Text(
+            "Стереть всё",
+            style = Type.Small.copy(color = Palette.Signal),
+            modifier = Modifier.clickable(onClick = onClear),
+        )
+    }
+}
+
+/** Вкладка площадки: вход и скачивание из твоей ленты. */
+@Composable
+private fun PlatformTab(state: UiState, vm: AppViewModel, platform: YtDlp.Platform) {
+    AppButton("Вход в ${platform.title}", tail = "один раз") {
+        vm.setPlatform(platform)
+        vm.openLogin()
+    }
+    Spacer(Modifier.height(10.dp))
+    AppButton(
+        "Скачать из ленты",
+        tail = "рекомендации ${platform.title}",
+        primary = true,
+    ) {
+        vm.setPlatform(platform)
+        vm.go(Screen.DOWNLOAD)
+    }
+
+    Spacer(Modifier.height(18.dp))
+    Text(
+        "Приложение открывает твою ленту ${platform.title} скрыто, листает её " +
+            "и запоминает ролики. Смотреть их заранее не нужно — они окажутся " +
+            "в плеере. Нужен вход в аккаунт.",
+        style = Type.Small,
+    )
+}
 
 @Composable
 fun DownloadScreen(state: UiState, vm: AppViewModel) {

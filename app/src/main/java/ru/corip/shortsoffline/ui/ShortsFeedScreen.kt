@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
+import ru.corip.shortsoffline.YtDlp
 
 /**
  * Твоя лента шортсов.
@@ -53,7 +54,8 @@ import kotlinx.coroutines.delay
  * ссылку вида /shorts/ID и переходы reelWatchEndpoint, которыми помечены
  * именно ролики ленты.
  */
-private const val JS_EXTRACT = """
+/** Собираем полные ссылки на ролики: у площадок они разного вида. */
+private const val JS_EXTRACT_YT = """
 (function(){
   var found = [], seen = {};
   var html = document.documentElement.innerHTML;
@@ -64,10 +66,29 @@ private const val JS_EXTRACT = """
   for (var p = 0; p < patterns.length; p++) {
     var m;
     while ((m = patterns[p].exec(html)) !== null) {
-      if (!seen[m[1]]) { seen[m[1]] = 1; found.push(m[1]); }
+      if (!seen[m[1]]) {
+        seen[m[1]] = 1;
+        found.push("https://www.youtube.com/shorts/" + m[1]);
+      }
     }
   }
-  return found.join(",");
+  return found.join(" ");
+})()
+"""
+
+private const val JS_EXTRACT_TT = """
+(function(){
+  var found = [], seen = {};
+  var html = document.documentElement.innerHTML;
+  var re = /\/@([A-Za-z0-9_.\-]{1,30})\/video\/(\d{15,21})/g;
+  var m;
+  while ((m = re.exec(html)) !== null) {
+    if (!seen[m[2]]) {
+      seen[m[2]] = 1;
+      found.push("https://www.tiktok.com/@" + m[1] + "/video/" + m[2]);
+    }
+  }
+  return found.join(" ");
 })()
 """
 
@@ -106,7 +127,7 @@ private fun WebView.swipeUp() {
 }
 
 
-private const val FEED_URL = "https://m.youtube.com/shorts"
+
 
 // Обычный мобильный Chrome: встроенный браузер по умолчанию помечает себя
 // как «wv», и по этой метке Google отказывает во входе.
@@ -117,6 +138,7 @@ const val UA =
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun ShortsFeedScreen(
+    platform: YtDlp.Platform,
     collected: List<String>,
     target: Int,
     onCollect: (String) -> Unit,
@@ -139,7 +161,9 @@ fun ShortsFeedScreen(
         delay(3000)
         // Вход показываем справочно и сбор им не перекрываем: определитель
         // может ошибиться, а лента при этом работать.
-        view.evaluateJavascript(JS_LOGGED_IN) { r ->
+        val loginCheck =
+            if (platform == YtDlp.Platform.TIKTOK) JS_LOGGED_IN_TT else JS_LOGGED_IN
+        view.evaluateJavascript(loginCheck) { r ->
             when (r.trim('"')) {
                 "yes" -> loggedIn = true
                 "no" -> loggedIn = false
@@ -157,12 +181,13 @@ fun ShortsFeedScreen(
             status = if (target > 0) "Собираю ленту: ${mine.size} из $target"
                 else "Собираю ленту: ${mine.size}, жми «Хватит» когда достаточно"
 
-            view.evaluateJavascript(JS_EXTRACT) { raw ->
-                raw.trim('"').replace("\\\"", "").split(",")
-                    .filter { id -> id.length == 11 }
-                    .forEach { id ->
-                        if (mine.add(id)) onCollect(id)
-                    }
+            val extractor =
+                if (platform == YtDlp.Platform.TIKTOK) JS_EXTRACT_TT else JS_EXTRACT_YT
+            view.evaluateJavascript(extractor) { raw ->
+                raw.trim('"').replace("\\\"", "").split(" ")
+                    .map { it.trim() }
+                    .filter { it.startsWith("http") }
+                    .forEach { link -> if (mine.add(link)) onCollect(link) }
             }
             delay(600)
             found = mine.size
@@ -196,7 +221,7 @@ fun ShortsFeedScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.padding(end = 12.dp)) {
-                Text("Моя лента шортсов", style = Type.Data)
+                Text("Моя лента · ${platform.title}", style = Type.Data)
                 Text(
                     status,
                     style = Type.Label.copy(
@@ -253,7 +278,7 @@ fun ShortsFeedScreen(
                         settings.userAgentString = UA
                         webViewClient = WebViewClient()
                         webChromeClient = WebChromeClient()
-                        loadUrl(FEED_URL)
+                        loadUrl(platform.feedUrl)
                         web = this
                     }
                 },
@@ -283,7 +308,7 @@ fun ShortsFeedScreen(
                     Spacer(Modifier.height(20.dp))
                     Text(
                         if (loggedIn == false)
-                            "YouTube не узнаёт тебя. Вернись и нажми «Вход в YouTube»."
+                            "${platform.title} не узнаёт тебя. Вернись и войди в аккаунт."
                         else "Листаю твою ленту и запоминаю ролики. Смотреть их сейчас не нужно.",
                         style = Type.Small.copy(
                             color = if (loggedIn == false) Palette.Signal else Palette.Muted

@@ -63,8 +63,9 @@ private fun App(vm: AppViewModel = viewModel()) {
     ) {
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
-            Screen.LOGIN -> LoginScreen(onDone = { vm.go(Screen.MENU) })
+            Screen.LOGIN -> LoginScreen(state.platform, onDone = { vm.go(Screen.MENU) })
             Screen.FEED -> ShortsFeedScreen(
+                platform = state.platform,
                 collected = state.collected,
                 target = state.count,
                 onCollect = { vm.collectShort(it) },

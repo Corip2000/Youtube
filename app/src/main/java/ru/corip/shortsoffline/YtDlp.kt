@@ -108,6 +108,14 @@ object YtDlp {
 
     private fun url(id: String) = "https://www.youtube.com/watch?v=$id"
 
+    /** Номер ролика из ссылки — им называем файлы и отсеиваем повторы. */
+    fun idFromUrl(link: String): String {
+        Regex("""[?&]v=([A-Za-z0-9_-]{11})""").find(link)?.let { return it.groupValues[1] }
+        Regex("""/shorts/([A-Za-z0-9_-]{11})""").find(link)?.let { return it.groupValues[1] }
+        Regex("""/video/(\d{15,21})""").find(link)?.let { return it.groupValues[1] }
+        return link.substringAfterLast('/').substringBefore('?').take(24)
+    }
+
     /** Общие опции: куки подставляются, если вход выполнен. */
     private fun request(target: String, cookies: File?): YoutubeDLRequest =
         YoutubeDLRequest(target).apply {
@@ -123,6 +131,30 @@ object YtDlp {
     }
 
     // ------------------------------------------------------------------ ленты
+
+    /**
+     * Откуда берём ленту. Скачивание у yt-dlp одинаковое для обеих площадок,
+     * различаются только адреса и вид ссылки на ролик.
+     */
+    enum class Platform(
+        val title: String,
+        val feedUrl: String,
+        val loginUrl: String,
+        val maxSeconds: Int,
+    ) {
+        YOUTUBE(
+            "YouTube",
+            "https://m.youtube.com/shorts",
+            "https://accounts.google.com/ServiceLogin?service=youtube",
+            MAX_SHORT_SECONDS,
+        ),
+        TIKTOK(
+            "TikTok",
+            "https://www.tiktok.com/foryou",
+            "https://www.tiktok.com/login",
+            600,
+        ),
+    }
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
         // Рекомендации собираются не через yt-dlp, а из твоей ленты в браузере:
@@ -160,6 +192,7 @@ object YtDlp {
             likes = 0,
             commentCount = 0,
             thumbUrl = firstThumb(e),
+            url = e.optString("url").ifBlank { url(id) },
             fromShortsFeed = fromShorts || shortsUrl,
         )
     }
@@ -277,11 +310,11 @@ object YtDlp {
     fun estimateSize(durationSeconds: Int): Long =
         (durationSeconds.coerceAtLeast(1) * 250_000L)
 
-    suspend fun probe(id: String): Probe? = withContext(Dispatchers.IO) {
+    suspend fun probe(link: String): Probe? = withContext(Dispatchers.IO) {
         runCatching {
             // Без куков: ролики публичные, а с куками YouTube отдаёт
             // "The page needs to be reloaded" (баг yt-dlp #17389).
-            val req = request(url(id), null).apply {
+            val req = request(link, null).apply {
                 addOption("-f", format())
                 addOption("--dump-single-json")
                 addOption("--skip-download")
@@ -459,14 +492,16 @@ object YtDlp {
      */
     suspend fun download(
         id: String,
+        link: String,
         dir: File,
         maxTop: Int,
         maxReplies: Int,
         requireVertical: Boolean,
+        maxSeconds: Int,
         onProgress: (Float) -> Unit,
     ): Downloaded = withContext(Dispatchers.IO) {
         dir.mkdirs()
-        val req = request(url(id), null).apply {
+        val req = request(link, null).apply {
             addOption("-f", format())
             addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
             addOption("--no-mtime")
@@ -479,8 +514,8 @@ object YtDlp {
             // отбрасывал вообще всё.
             addOption(
                 "--match-filter",
-                if (requireVertical) "duration <= $MAX_SHORT_SECONDS & height > width"
-                else "duration <= $MAX_SHORT_SECONDS",
+                if (requireVertical) "duration <= $maxSeconds & height > width"
+                else "duration <= $maxSeconds",
             )
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
             addOption("--write-info-json")

@@ -18,6 +18,13 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, PLAYER }
+
+/** Вкладки главного экрана. */
+enum class Tab(val title: String) {
+    VIDEO("Видео"),
+    YOUTUBE("YouTube"),
+    TIKTOK("TikTok"),
+}
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
@@ -33,7 +40,9 @@ data class UiState(
     val sessionFreed: Long = 0,
     val showReceipt: Boolean = false,
 
-    val feed: YtDlp.Feed = YtDlp.Feed.CUSTOM,
+    val tab: Tab = Tab.VIDEO,
+    val platform: YtDlp.Platform = YtDlp.Platform.YOUTUBE,
+    val feed: YtDlp.Feed = YtDlp.Feed.RECOMMENDED,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
     val jobMessage: String = "",
@@ -90,6 +99,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             it.copy(
                 feed = saved,
                 customUrl = store.customTarget,
+                platform = runCatching { YtDlp.Platform.valueOf(store.platform) }
+                    .getOrDefault(YtDlp.Platform.YOUTUBE),
                 commentDepth = store.commentDepth,
                 fastSize = store.fastSize,
             )
@@ -110,6 +121,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------ моя лента
+
+    fun setTab(value: Tab) = _state.update { it.copy(tab = value) }
+
+    fun setPlatform(value: YtDlp.Platform) {
+        store.platform = value.name
+        _state.update { it.copy(platform = value) }
+    }
 
     fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }
 
@@ -179,8 +197,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(screen = Screen.FEED, collected = emptyList())
     }
 
-    fun collectShort(id: String) = _state.update {
-        if (id in it.collected) it else it.copy(collected = it.collected + id)
+    /** Из ленты приходят полные ссылки: у YouTube и TikTok они разного вида. */
+    fun collectShort(link: String) = _state.update {
+        if (link in it.collected) it else it.copy(collected = it.collected + link)
     }
 
     /**
@@ -188,7 +207,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * определению, проверять нечего. Скачивание запускается само.
      */
     fun useCollected() {
-        val ids = _state.value.collected.filter { it !in store.ids() }
+        val known = store.ids()
+        val ids = _state.value.collected.filter { YtDlp.idFromUrl(it) !in known }
         if (ids.isEmpty()) {
             _state.update {
                 it.copy(
@@ -199,11 +219,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         val limit = _state.value.count.takeIf { it > 0 } ?: ids.size
-        val found = ids.take(limit).map { id ->
+        val found = ids.take(limit).map { link ->
             Candidate(
-                id = id, title = "Шортс", channel = "", duration = 0,
+                id = YtDlp.idFromUrl(link), title = "Видео", channel = "", duration = 0,
                 views = 0, likes = 0, commentCount = 0, thumbUrl = null,
-                fromShortsFeed = true,
+                url = link, fromShortsFeed = true,
             ).also { it.size = YtDlp.estimateSize(30) }
         }
         _state.update {
@@ -325,7 +345,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         for (chunk in unclear.chunked(4)) {
                             if (sure.size + checked.size >= wanted) break
                             val part = coroutineScope {
-                                chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.id) } }
+                                chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.url) } }
                                     .awaitAll()
                             }
                             for ((c, pr) in part) {
@@ -375,7 +395,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 for (chunk in pool.chunked(4)) {
                     if (probed.count { it.second != null } >= wanted * 2) break
                     val part = coroutineScope {
-                        chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.id) } }.awaitAll()
+                        chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.url) } }.awaitAll()
                     }
                     probed.addAll(part)
                     _state.update { it.copy(checked = it.checked + chunk.size) }
@@ -453,10 +473,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         async(Dispatchers.IO) {
                             runCatching {
                                 val result = YtDlp.download(
-                                    candidate.id, store.videosDir,
+                                    candidate.id, candidate.url, store.videosDir,
                                     maxTop = depth,
                                     maxReplies = if (depth >= 100) 10 else 5,
                                     requireVertical = !candidate.fromShortsFeed,
+                                    maxSeconds = _state.value.platform.maxSeconds,
                                 ) { }
                                 val thumb = YtDlp.thumbnail(
                                     candidate.thumbUrl ?: result.thumbUrl,

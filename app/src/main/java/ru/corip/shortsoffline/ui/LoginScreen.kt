@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import ru.corip.shortsoffline.YtDlp
 
 /**
  * Вход в YouTube. Делается один раз: у браузера внутри приложения своя
@@ -36,11 +37,9 @@ import androidx.compose.ui.viewinterop.AndroidView
  * Для скачивания вход не нужен вовсе — ролики публичные. Он нужен только
  * чтобы лента была твоей, а не обезличенной.
  */
-private const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube"
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LoginScreen(onDone: () -> Unit) {
+fun LoginScreen(platform: YtDlp.Platform, onDone: () -> Unit) {
     var web by remember { mutableStateOf<WebView?>(null) }
     DisposableEffect(Unit) { onDispose { web?.destroy() } }
 
@@ -58,7 +57,7 @@ fun LoginScreen(onDone: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.padding(end = 12.dp)) {
-                Text("Вход в YouTube", style = Type.Data)
+                Text("Вход в ${platform.title}", style = Type.Data)
                 Text("Войди в аккаунт, потом жми «Готово»", style = Type.Label)
             }
             Text(
@@ -85,7 +84,7 @@ fun LoginScreen(onDone: () -> Unit) {
                     settings.userAgentString = UA
                     webViewClient = WebViewClient()
                     webChromeClient = WebChromeClient()
-                    loadUrl(LOGIN_URL)
+                    loadUrl(platform.loginUrl)
                     web = this
                 }
             },

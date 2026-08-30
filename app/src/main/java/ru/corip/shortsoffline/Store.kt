@@ -27,7 +27,9 @@ data class Candidate(
     val likes: Long,
     val commentCount: Long,
     val thumbUrl: String?,
-    /** Взят из вкладки /shorts или хэштега — значит это точно шортс. */
+    /** Полный адрес страницы ролика: у YouTube и TikTok он разный. */
+    val url: String = "",
+    /** Взят из шортс-ленты — значит это точно вертикальный ролик. */
     val fromShortsFeed: Boolean = false,
     var size: Long = 0,
     var width: Int = 0,
@@ -81,6 +83,11 @@ class Store(context: Context) {
     var commentDepth: Int
         get() = prefs.getInt("comment_depth", 30)
         set(v) = prefs.edit().putInt("comment_depth", v).apply()
+
+    /** Выбранная площадка: YOUTUBE или TIKTOK. */
+    var platform: String
+        get() = prefs.getString("platform", "YOUTUBE") ?: "YOUTUBE"
+        set(v) = prefs.edit().putString("platform", v).apply()
 
     var customTarget: String
         get() = prefs.getString("custom_target", "") ?: ""
