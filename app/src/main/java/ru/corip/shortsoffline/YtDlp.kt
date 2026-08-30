@@ -373,6 +373,72 @@ object YtDlp {
     private fun commentArgs(maxTop: Int, maxReplies: Int) =
         "youtube:comment_sort=top;max_comments=all,$maxTop,all,$maxReplies"
 
+    class LinkInfo(
+        val id: String,
+        val title: String,
+        val channel: String,
+        val duration: Int,
+        val size: Long,
+        val isShort: Boolean,
+    )
+
+    /** Разбор одиночной ссылки: что это за видео и сколько весит. */
+    suspend fun linkInfo(link: String): LinkInfo = withContext(Dispatchers.IO) {
+        val req = request(link.trim(), null).apply {
+            addOption("-f", format())
+            addOption("--dump-single-json")
+            addOption("--skip-download")
+            addOption("--no-playlist")
+        }
+        val json = parse(run(req))
+        var size = 0L
+        json.optJSONArray("requested_downloads")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val p = arr.getJSONObject(i)
+                size += p.optLong("filesize").takeIf { it > 0 } ?: p.optLong("filesize_approx")
+            }
+        }
+        if (size == 0L) {
+            size = json.optLong("filesize").takeIf { it > 0 }
+                ?: json.optLong("filesize_approx").takeIf { it > 0 }
+                ?: (json.optDouble("tbr", 0.0) * 125 * json.optInt("duration")).toLong()
+        }
+        val duration = json.optInt("duration")
+        LinkInfo(
+            id = json.optString("id"),
+            title = json.optString("title").ifBlank { "Без названия" },
+            channel = json.optString("channel").ifBlank { json.optString("uploader") },
+            duration = duration,
+            size = size,
+            isShort = duration in 1..MAX_SHORT_SECONDS,
+        )
+    }
+
+    /** Скачивание одиночного видео: без комментариев и без ограничений по длине. */
+    suspend fun downloadPlain(
+        link: String,
+        dir: File,
+        onProgress: (Float) -> Unit,
+    ): File = withContext(Dispatchers.IO) {
+        dir.mkdirs()
+        val req = request(link.trim(), null).apply {
+            addOption("-f", format())
+            addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
+            addOption("--no-mtime")
+            addOption("--no-playlist")
+            addOption("--concurrent-fragments", "4")
+            if (ffmpegReady) addOption("--merge-output-format", "mp4")
+        }
+        YoutubeDL.getInstance().execute(req, "solo") { progress, _, _ ->
+            onProgress((progress / 100f).coerceIn(0f, 1f))
+        }
+        dir.listFiles { f ->
+            !f.name.endsWith(".part") && !f.name.endsWith(".ytdl") &&
+                !f.name.endsWith(".json") && !f.name.endsWith(".jpg")
+        }?.maxByOrNull { it.lastModified() }
+            ?: throw IllegalStateException("yt-dlp отработал, но файла нет.")
+    }
+
     class Downloaded(
         val file: File,
         val comments: List<Comment>,

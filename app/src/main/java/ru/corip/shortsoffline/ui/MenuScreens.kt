@@ -1,5 +1,7 @@
 package ru.corip.shortsoffline.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,6 +52,9 @@ import ru.corip.shortsoffline.formatDuration
 @Composable
 fun MenuScreen(state: UiState, vm: AppViewModel) {
     var confirmClear by remember { mutableStateOf(false) }
+    val picker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.openLocal(uri.toString()) }
 
     Column(
         Modifier
@@ -99,10 +104,16 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         AppButton("Вход в YouTube", tail = "один раз") { vm.openLogin() }
         Spacer(Modifier.height(10.dp))
         AppButton(
-            "Скачать видео",
-            tail = "рекомендации или ссылка",
+            "Скачать шортсы",
+            tail = "из твоих рекомендаций",
             primary = true,
         ) { vm.go(Screen.DOWNLOAD) }
+        Spacer(Modifier.height(10.dp))
+        AppButton("Видео по ссылке", tail = "в галерею") { vm.openLink() }
+        Spacer(Modifier.height(10.dp))
+        AppButton("Открыть видео с телефона", tail = "посмотреть тут") {
+            picker.launch(arrayOf("video/*"))
+        }
         Spacer(Modifier.height(10.dp))
         AppButton(
             "Смотреть шортсы",
@@ -270,21 +281,31 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
-                    "${state.count}",
+                    if (state.count == 0) "\u221E" else "${state.count}",
                     style = Type.Display.copy(fontSize = 34.sp),
                 )
-                Text("  шортсов", style = Type.Small, modifier = Modifier.padding(bottom = 6.dp))
+                Text(
+                    if (state.count == 0) "  без предела" else "  шортсов",
+                    style = Type.Small,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
             }
             Slider(
                 value = state.count.toFloat(),
                 onValueChange = { vm.setCount(it.toInt()) },
-                valueRange = 1f..50f,
+                valueRange = 0f..50f,
                 colors = SliderDefaults.colors(
                     thumbColor = Palette.Signal,
                     activeTrackColor = Palette.Signal,
                     inactiveTrackColor = Palette.PanelHi,
                 ),
             )
+            if (state.count == 0) {
+                Text(
+                    "Лента будет листаться, пока ты не нажмёшь «Хватит».",
+                    style = Type.Small,
+                )
+            }
         }
 
         Spacer(Modifier.height(12.dp))

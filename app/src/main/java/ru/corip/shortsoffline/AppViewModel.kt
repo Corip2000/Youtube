@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, PLAYER }
+enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, PLAYER }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
@@ -61,6 +61,15 @@ data class UiState(
     val collected: List<String> = emptyList(),
     val diagnostics: String? = null,
     val ytdlpVersion: String? = null,
+    // одиночная ссылка
+    val linkUrl: String = "",
+    val linkInfo: YtDlp.LinkInfo? = null,
+    val linkBusy: Boolean = false,
+    val linkStatus: String? = null,
+    val linkProgress: Float = 0f,
+    // видео с телефона
+    val localUri: String? = null,
+
     val toast: String? = null,
 ) {
     val current: Saved? get() = queue.getOrNull(index)
@@ -76,7 +85,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var jobHandle: Job? = null
 
     init {
-        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.CUSTOM)
+        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
         _state.update {
             it.copy(
                 feed = saved,
@@ -104,6 +113,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }
 
+    // ------------------------------------------------------------ одно видео
+
+    fun openLink() = _state.update {
+        it.copy(screen = Screen.LINK, linkInfo = null, linkStatus = null, linkProgress = 0f)
+    }
+
+    fun setLinkUrl(value: String) = _state.update {
+        it.copy(linkUrl = value, linkInfo = null, linkStatus = null)
+    }
+
+    fun checkLink() = viewModelScope.launch {
+        val url = _state.value.linkUrl.trim()
+        if (url.isBlank()) return@launch
+        _state.update { it.copy(linkBusy = true, linkStatus = "Смотрю, что это за видео…") }
+        runCatching { YtDlp.linkInfo(url) }
+            .onSuccess { info ->
+                _state.update { it.copy(linkBusy = false, linkInfo = info, linkStatus = null) }
+            }
+            .onFailure { e ->
+                _state.update {
+                    it.copy(
+                        linkBusy = false,
+                        linkStatus = YtDlp.lastError ?: e.message ?: "Ссылку открыть не вышло.",
+                    )
+                }
+            }
+    }
+
+    /** Качаем и сразу кладём в галерею — без лайков и комментариев. */
+    fun downloadLink() = viewModelScope.launch {
+        val url = _state.value.linkUrl.trim()
+        val info = _state.value.linkInfo ?: return@launch
+        _state.update { it.copy(linkBusy = true, linkStatus = "Качаю…", linkProgress = 0f) }
+        runCatching {
+            val temp = File(getApplication<Application>().cacheDir, "solo")
+            temp.deleteRecursively()
+            val file = YtDlp.downloadPlain(url, temp) { p ->
+                _state.update { it.copy(linkProgress = p) }
+            }
+            Gallery.saveVideo(getApplication(), file, info.title)
+        }.onSuccess { where ->
+            _state.update {
+                it.copy(linkBusy = false, linkProgress = 1f, linkStatus = "Сохранено в $where")
+            }
+        }.onFailure { e ->
+            _state.update {
+                it.copy(
+                    linkBusy = false,
+                    linkStatus = YtDlp.lastError ?: e.message ?: "Скачать не вышло.",
+                )
+            }
+        }
+    }
+
+    // ------------------------------------------------------------ видео с телефона
+
+    fun openLocal(uri: String) = _state.update {
+        it.copy(screen = Screen.SOLO, localUri = uri)
+    }
+
+    fun closeLocal() = _state.update { it.copy(screen = Screen.MENU, localUri = null) }
+
     fun openFeed() = _state.update {
         it.copy(screen = Screen.FEED, collected = emptyList())
     }
@@ -127,7 +198,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             return
         }
-        val found = ids.take(_state.value.count).map { id ->
+        val limit = _state.value.count.takeIf { it > 0 } ?: ids.size
+        val found = ids.take(limit).map { id ->
             Candidate(
                 id = id, title = "Шортс", channel = "", duration = 0,
                 views = 0, likes = 0, commentCount = 0, thumbUrl = null,
@@ -186,7 +258,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun dismissDiagnostics() = _state.update { it.copy(diagnostics = null) }
 
-    fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(1, 50)) }
+    /** 0 означает «без предела»: сбор идёт, пока не нажмёшь «Хватит». */
+    fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(0, 50)) }
 
     private fun refreshStorage() = _state.update {
         it.copy(

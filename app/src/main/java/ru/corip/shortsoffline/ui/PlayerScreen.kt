@@ -141,6 +141,7 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
                     ) { _, amount -> total += amount }
                 }
                 .pointerInput(current?.id) {
+                    val third = size.width / 3f
                     detectTapGestures(
                         onPress = {
                             // Держишь — ускорение вдвое, отпустил — обычная скорость.
@@ -154,9 +155,14 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
                             }
                         },
                         onDoubleTap = { vm.deleteCurrent() },
-                        onTap = {
-                            if (!holding) {
-                                if (player.isPlaying) player.pause() else player.play()
+                        onTap = { offset ->
+                            if (holding) return@detectTapGestures
+                            when {
+                                offset.x < third ->
+                                    player.seekTo((player.currentPosition - 10_000).coerceAtLeast(0))
+                                offset.x > third * 2 ->
+                                    player.seekTo(player.currentPosition + 10_000)
+                                else -> if (player.isPlaying) player.pause() else player.play()
                             }
                         },
                     )
@@ -233,7 +239,7 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Двойное нажатие — удалить · удержание — ускорение \u00D72",
+                    "Двойной тап — удалить · бока −10/+10 с · удержание \u00D72",
                     style = Type.Label.copy(color = Color(0xFF9A93A8), letterSpacing = 0.sp),
                 )
                 Spacer(Modifier.height(6.dp))

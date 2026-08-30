@@ -87,7 +87,7 @@ class Store(context: Context) {
         set(v) = prefs.edit().putString("custom_target", v.trim()).apply()
 
     var lastFeed: String
-        get() = prefs.getString("last_feed", "RANDOM") ?: "RANDOM"
+        get() = prefs.getString("last_feed", "RECOMMENDED") ?: "RECOMMENDED"
         set(v) = prefs.edit().putString("last_feed", v).apply()
 
     // ---------- индекс ----------

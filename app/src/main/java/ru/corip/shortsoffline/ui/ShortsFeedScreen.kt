@@ -150,9 +150,10 @@ fun ShortsFeedScreen(
         // на значении из момента запуска и обновляться не будет.
         val mine = linkedSetOf<String>()
 
-        repeat(30) {
+        repeat(if (target > 0) 40 else 400) {
             if (done) return@LaunchedEffect
-            status = "Собираю ленту: ${mine.size} из $target"
+            status = if (target > 0) "Собираю ленту: ${mine.size} из $target"
+                else "Собираю ленту: ${mine.size}, жми «Хватит» когда достаточно"
 
             view.evaluateJavascript(JS_EXTRACT) { raw ->
                 raw.trim('"').replace("\\\"", "").split(",")
@@ -164,7 +165,7 @@ fun ShortsFeedScreen(
             delay(600)
             found = mine.size
 
-            if (mine.size >= target) {
+            if (target > 0 && mine.size >= target) {
                 done = true
                 onDone()
                 return@LaunchedEffect
@@ -210,7 +211,7 @@ fun ShortsFeedScreen(
 
         Box(Modifier.padding(horizontal = 18.dp)) {
             Bar(
-                if (target > 0) found.toFloat() / target else 0f,
+                if (target > 0) found.toFloat() / target else 1f,
                 color = Palette.Jade,
             )
         }
@@ -273,7 +274,10 @@ fun ShortsFeedScreen(
                         style = Type.Display.copy(fontSize = 64.sp, color = Palette.Jade),
                     )
                     Spacer(Modifier.height(6.dp))
-                    Text("собрано из $target", style = Type.Small)
+                    Text(
+                        if (target > 0) "собрано из $target" else "собрано, предела нет",
+                        style = Type.Small,
+                    )
                     Spacer(Modifier.height(20.dp))
                     Text(
                         if (loggedIn == false)

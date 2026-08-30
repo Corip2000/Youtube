@@ -25,7 +25,7 @@ android {
 
     defaultConfig {
         applicationId = "ru.corip.shortsoffline"
-        minSdk = 26   // адаптивная иконка + без legacy-хвостов
+        minSdk = 29   // MediaStore без разрешений на запись
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"

@@ -21,7 +21,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.corip.shortsoffline.ui.DownloadScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
+import ru.corip.shortsoffline.ui.LinkScreen
 import ru.corip.shortsoffline.ui.LoginScreen
+import ru.corip.shortsoffline.ui.SoloPlayerScreen
 import ru.corip.shortsoffline.ui.PlayerScreen
 import ru.corip.shortsoffline.ui.ShortsFeedScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
@@ -70,6 +72,10 @@ private fun App(vm: AppViewModel = viewModel()) {
                 onCancel = { vm.go(Screen.MENU) },
             )
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
+            Screen.LINK -> LinkScreen(state, vm)
+            Screen.SOLO -> state.localUri?.let {
+                SoloPlayerScreen(it, onClose = { vm.closeLocal() })
+            }
             Screen.PLAYER -> PlayerScreen(state, vm)
         }
 
