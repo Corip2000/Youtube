@@ -101,6 +101,16 @@ private const val JS_LOGGED_IN = """
 })()
 """
 
+/** У TikTok признак входа называется иначе. */
+private const val JS_LOGGED_IN_TT = """
+(function(){
+  var h = document.documentElement.innerHTML;
+  if (h.indexOf('"isLogin":true') >= 0) return 'yes';
+  if (h.indexOf('"isLogin":false') >= 0) return 'no';
+  return 'unknown';
+})()
+"""
+
 /**
  * Настоящий свайп пальцем по ленте. Прокрутка через JavaScript в плеере
  * шортсов не работает — он слушает касания, а не скролл. Поэтому шлём
