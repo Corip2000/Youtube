@@ -132,11 +132,61 @@ object YtDlp {
         CUSTOM("", "Своя ссылка", false),
     }
 
-    /**
-     * Поиск с фильтром «Шортсы» (параметр sp). YouTube отдаёт только
-     * вертикальные ролики, вход не нужен, тема каждый раз новая —
-     * это и даёт ощущение случайной ленты.
-     */
+    /** Один запрос списком, без захода в каждый ролик. */
+    private fun flat(target: String, cookies: File?, limit: Int): JSONObject {
+        val req = request(target, cookies).apply {
+            addOption("--flat-playlist")
+            addOption("--dump-single-json")
+            addOption("--playlist-end", limit.toString())
+        }
+        return parse(run(req))
+    }
+
+    private fun entryToCandidate(e: JSONObject, fromShorts: Boolean): Candidate? {
+        val id = e.optString("id")
+        if (id.isBlank() || id.length != 11) return null
+        val duration = e.optInt("duration", -1)
+        if (duration > MAX_SHORT_SECONDS) return null
+        // Самый надёжный признак: YouTube отдаёт шортсы ссылкой вида
+        // youtube.com/shorts/ID. Длительности в выдаче может не быть вовсе.
+        val shortsUrl = e.optString("url").contains("/shorts/") ||
+            e.optString("webpage_url").contains("/shorts/")
+        return Candidate(
+            id = id,
+            title = e.optString("title").ifBlank { id },
+            channel = e.optString("channel").ifBlank { e.optString("uploader") },
+            duration = if (duration > 0) duration else 0,
+            views = e.optLong("view_count"),
+            likes = 0,
+            commentCount = 0,
+            thumbUrl = firstThumb(e),
+            fromShortsFeed = fromShorts || shortsUrl,
+        )
+    }
+
+    /** Один живой запрос к YouTube — чтобы видеть ответ, а не догадки. */
+    suspend fun diagnose(context: Context): String = withContext(Dispatchers.IO) {
+        val report = StringBuilder()
+        report.append(if (ffmpegReady) "ffmpeg: готов\n" else "ffmpeg: НЕ поднялся\n")
+        runCatching {
+            report.append("Версия yt-dlp: ").append(version(context) ?: "неизвестна").append("\n")
+        }.onFailure { report.append("Версия yt-dlp: не определилась\n") }
+
+        report.append("\n")
+        runCatching {
+            val json = flat("https://www.youtube.com/hashtag/shorts", null, 3)
+            val n = json.optJSONArray("entries")?.length() ?: 0
+            report.append("Хэштег #shorts: получено роликов ").append(n)
+            if (n > 0) {
+                report.append("\nПервый: ")
+                    .append(json.optJSONArray("entries")?.optJSONObject(0)?.optString("title"))
+            }
+        }.onFailure {
+            report.append("Хэштег #shorts не открылся.\n").append(lastError ?: it.message)
+        }
+        report.toString()
+    }
+
     /**
      * Список роликов из ленты. Личные ленты отдают только id/title/duration,
      * поля канала в них нет — поэтому шортсы отбираем прямо по длительности,
