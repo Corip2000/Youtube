@@ -120,7 +120,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun useCollected() {
         val ids = _state.value.collected.filter { it !in store.ids() }
         if (ids.isEmpty()) {
-            _state.update { it.copy(screen = Screen.MENU, toast = "Всё это уже скачано.") }
+            _state.update {
+                it.copy(
+                    screen = Screen.DOWNLOAD, jobState = JobState.FAILED,
+                    jobMessage = "Всё, что нашлось в ленте, уже скачано.",
+                )
+            }
             return
         }
         val found = ids.take(_state.value.count).map { id ->
@@ -136,11 +141,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 found = found,
                 foundBytes = found.sumOf { c -> c.size },
                 jobState = JobState.READY,
-                jobMessage = "Из твоей ленты: ${found.size}",
+                jobMessage = "Нашёл ${found.size} шортсов в твоей ленте",
                 downloaded = 0, downloadedBytes = 0, skipped = 0, downloadError = null,
             )
         }
-        startDownload()
     }
 
     fun updateYtdlp() = viewModelScope.launch {
@@ -198,6 +202,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun find() {
         val feed = _state.value.feed
+        // Рекомендации живут в браузере: уходим их собирать, вернёмся сюда же
+        // со списком найденного.
+        if (feed == YtDlp.Feed.RECOMMENDED) {
+            _state.update {
+                it.copy(
+                    screen = Screen.FEED, collected = emptyList(),
+                    found = emptyList(), foundBytes = 0,
+                    jobState = JobState.SEARCHING, jobMessage = "Читаю твою ленту…",
+                    downloaded = 0, downloadedBytes = 0, skipped = 0, downloadError = null,
+                )
+            }
+            return
+        }
+
         jobHandle?.cancel()
         _state.update {
             it.copy(
