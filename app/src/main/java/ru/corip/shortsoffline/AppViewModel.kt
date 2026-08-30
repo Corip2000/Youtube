@@ -255,6 +255,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 "youtube.com/@канал/shorts."
                         )
                     }
+                    // Вес: у досмотренных он уже точный, остальным ставим оценку.
+                    quick.forEach { c ->
+                        if (c.size <= 0) c.size = YtDlp.estimateSize(c.duration)
+                    }
                     _state.update {
                         it.copy(
                             found = quick,

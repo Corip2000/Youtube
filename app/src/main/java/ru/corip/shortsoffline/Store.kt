@@ -268,6 +268,12 @@ fun formatBytes(n: Long): String {
     else String.format("%.1f %s", value, units[i])
 }
 
+fun formatDuration(seconds: Int): String {
+    val m = seconds / 60
+    val s = seconds % 60
+    return "$m:" + s.toString().padStart(2, '0')
+}
+
 fun formatCount(n: Long): String = when {
     n >= 1_000_000 -> String.format("%.1fM", n / 1_000_000.0)
     n >= 1_000 -> String.format("%.1fK", n / 1_000.0)

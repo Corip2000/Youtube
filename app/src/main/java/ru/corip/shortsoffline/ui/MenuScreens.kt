@@ -45,6 +45,7 @@ import ru.corip.shortsoffline.Screen
 import ru.corip.shortsoffline.UiState
 import ru.corip.shortsoffline.YtDlp
 import ru.corip.shortsoffline.formatBytes
+import ru.corip.shortsoffline.formatDuration
 
 @Composable
 fun MenuScreen(state: UiState, vm: AppViewModel) {
@@ -435,7 +436,14 @@ private fun JobPanel(state: UiState, vm: AppViewModel) {
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f).padding(end = 10.dp),
                         )
-                        Text(formatBytes(item.size), style = Type.Small.copy(color = Palette.Ink))
+                        Text(
+                            (if (item.duration > 0) formatDuration(item.duration) + " · " else "") +
+                                formatBytes(item.size),
+                            style = Type.Small.copy(
+                                // Длиннее трёх минут — не шортс, подсвечиваем.
+                                color = if (item.duration > 180) Palette.Signal else Palette.Ink
+                            ),
+                        )
                     }
                     Spacer(Modifier.height(1.dp))
                 }
