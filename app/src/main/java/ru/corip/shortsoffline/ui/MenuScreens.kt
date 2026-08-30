@@ -142,6 +142,11 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         }
         Spacer(Modifier.height(10.dp))
         AppButton(
+            "Моя лента шортсов",
+            tail = "листать и качать",
+        ) { vm.openShortsPicker() }
+        Spacer(Modifier.height(10.dp))
+        AppButton(
             "Смотреть шортсы",
             tail = if (state.savedCount > 0)
                 "${state.savedCount} в очереди · ${formatBytes(state.savedBytes)}" else "пусто",

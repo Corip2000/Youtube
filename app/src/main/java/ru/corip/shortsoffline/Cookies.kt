@@ -63,6 +63,35 @@ object Cookies {
         return isSignedIn(context)
     }
 
+    /**
+     * Переносит сохранённые куки в WebView. Без этого раздел шортсов покажет
+     * обезличенную ленту, а нам нужна именно твоя.
+     */
+    fun injectIntoWebView(context: Context): Int {
+        val f = file(context)
+        if (!f.exists()) return 0
+        val manager = CookieManager.getInstance()
+        manager.setAcceptCookie(true)
+
+        var count = 0
+        f.readLines().forEach { line ->
+            if (line.startsWith("#") || line.isBlank()) return@forEach
+            val parts = line.split("\t")
+            if (parts.size < 7) return@forEach
+            val name = parts[5]
+            val value = parts[6]
+            if (name.isNotBlank() && value.isNotBlank()) {
+                manager.setCookie(
+                    "https://www.youtube.com",
+                    "$name=$value; Domain=.youtube.com; Path=/; Secure",
+                )
+                count++
+            }
+        }
+        manager.flush()
+        return count
+    }
+
     fun signOut(context: Context) {
         file(context).delete()
         CookieManager.getInstance().removeAllCookies(null)

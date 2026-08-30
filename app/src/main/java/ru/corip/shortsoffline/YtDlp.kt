@@ -126,7 +126,8 @@ object YtDlp {
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
         RECOMMENDED(":ytrec", "Рекомендации", true),
-        SUBSCRIPTIONS(":ytsubs", "Подписки", true),
+        SUBS_SHORTS(":ytsubs://user/", "Шортсы моих подписок", true),
+        SUBSCRIPTIONS(":ytsubs", "Лента подписок", true),
         LIKED(":ytfav", "Понравившиеся", true),
         HISTORY(":ythistory", "История", true),
         HASHTAG("https://www.youtube.com/hashtag/shorts", "#shorts \u00B7 без входа", false),
@@ -245,13 +246,59 @@ object YtDlp {
                 )
             }
 
+            // Подписки как список каналов: заходим прямо в раздел /shorts
+            // каждого. Там всё вертикальное, проверять нечего — отсюда и скорость.
+            if (feed == Feed.SUBS_SHORTS) {
+                val channels = LinkedHashSet<String>()
+                for (i in 0 until entries.length()) {
+                    val e = entries.optJSONObject(i) ?: continue
+                    val link = listOf("url", "channel_url", "uploader_url")
+                        .map { e.optString(it) }
+                        .firstOrNull { it.contains("/channel/") || it.contains("youtube.com/@") }
+                    if (link != null) channels.add(link.trimEnd('/').substringBefore("/videos"))
+                }
+                if (channels.isEmpty()) {
+                    error(
+                        "Список подписок пуст. Проверь вход — без сессии YouTube " +
+                            "каналов не покажет."
+                    )
+                }
+
+                val out = mutableListOf<Candidate>()
+                for (channel in channels.shuffled()) {
+                    if (out.size >= limit * 2) break
+                    runCatching {
+                        val tab = flat("$channel/shorts", cookies, 20)
+                        val items = tab.optJSONArray("entries") ?: return@runCatching
+                        for (i in 0 until items.length()) {
+                            val e = items.optJSONObject(i) ?: continue
+                            val c = entryToCandidate(e, true) ?: continue
+                            if (c.id !in exclude && out.none { it.id == c.id }) out.add(c)
+                        }
+                    }
+                }
+                if (out.isEmpty()) {
+                    error(
+                        "Прошёл по ${channels.size} каналам из подписок, " +
+                            "но шортсов у них нет."
+                    )
+                }
+                return@withContext out.shuffled()
+            }
+
+            // Хэштег #shorts и вкладка /shorts отдают только вертикальные ролики —
+            // такие источники можно не перепроверять. Личные ленты перемешаны
+            // с обычными видео, там без запроса не отличить.
+            val guaranteed = feed == Feed.HASHTAG ||
+                (feed == Feed.CUSTOM && target.contains("/shorts"))
+
             val direct = mutableListOf<Candidate>()
             var longOnes = 0
             for (i in 0 until entries.length()) {
                 val e = entries.optJSONObject(i) ?: continue
                 val seconds = e.optInt("duration", -1)
                 if (seconds > MAX_SHORT_SECONDS) { longOnes++; continue }
-                val c = entryToCandidate(e, seconds in 1..MAX_SHORT_SECONDS) ?: continue
+                val c = entryToCandidate(e, guaranteed) ?: continue
                 if (c.id !in exclude && direct.none { it.id == c.id }) direct.add(c)
             }
 
@@ -396,7 +443,17 @@ object YtDlp {
     private fun commentArgs(maxTop: Int, maxReplies: Int) =
         "youtube:comment_sort=top;max_comments=all,$maxTop,all,$maxReplies"
 
-    class Downloaded(val file: File, val comments: List<Comment>)
+    class Downloaded(
+        val file: File,
+        val comments: List<Comment>,
+        val title: String,
+        val channel: String,
+        val duration: Int,
+        val likes: Long,
+        val views: Long,
+        val commentCount: Long,
+        val thumbUrl: String?,
+    )
 
     /**
      * Скачивание и комментарии одним запуском yt-dlp.
@@ -420,10 +477,11 @@ object YtDlp {
             addOption("--retries", "2")
             // Последний рубеж: даже если длинный ролик проскочил фильтры,
             // yt-dlp откажется его качать.
-            addOption("--match-filter", "duration <= $MAX_SHORT_SECONDS")
+            // Последний рубеж: длинное или горизонтальное yt-dlp не возьмёт.
+            addOption("--match-filter", "duration <= $MAX_SHORT_SECONDS & height > width")
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
+            addOption("--write-info-json")
             if (maxTop > 0) {
-                addOption("--write-info-json")
                 addOption("--write-comments")
                 addOption("--extractor-args", commentArgs(maxTop, maxReplies))
             }
@@ -439,17 +497,34 @@ object YtDlp {
         }?.maxByOrNull { it.length() }
             ?: throw IllegalStateException("yt-dlp отработал, но файла нет.")
 
-        // yt-dlp кладёт комментарии в info.json рядом с видео.
+        // yt-dlp кладёт в info.json и комментарии, и все метаданные —
+        // значит отдельный запрос за названием и лайками не нужен.
         val info = File(dir, "$id.info.json")
-        val comments = if (info.exists()) {
-            val parsed = runCatching {
-                commentsFrom(JSONObject(info.readText()), maxTop, maxReplies)
-            }.getOrDefault(emptyList())
-            info.delete()
-            parsed
-        } else emptyList()
+        var comments = emptyList<Comment>()
+        var title = ""
+        var channel = ""
+        var duration = 0
+        var likes = 0L
+        var views = 0L
+        var commentCount = 0L
+        var thumb: String? = null
 
-        Downloaded(video, comments)
+        if (info.exists()) {
+            runCatching {
+                val json = JSONObject(info.readText())
+                if (maxTop > 0) comments = commentsFrom(json, maxTop, maxReplies)
+                title = json.optString("title")
+                channel = json.optString("channel").ifBlank { json.optString("uploader") }
+                duration = json.optInt("duration")
+                likes = json.optLong("like_count")
+                views = json.optLong("view_count")
+                commentCount = json.optLong("comment_count")
+                thumb = json.optString("thumbnail").ifBlank { null }
+            }
+            info.delete()
+        }
+
+        Downloaded(video, comments, title, channel, duration, likes, views, commentCount, thumb)
     }
 
     fun cancel(id: String) = runCatching { YoutubeDL.getInstance().destroyProcessById(id) }

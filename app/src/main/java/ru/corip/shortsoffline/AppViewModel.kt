@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, DOWNLOAD, PLAYER }
+enum class Screen { MENU, LOGIN, SHORTS_PICKER, DOWNLOAD, PLAYER }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
@@ -59,6 +59,7 @@ data class UiState(
     val commentDepth: Int = 30,
     val fastSize: Boolean = true,
     val running: Int = 0,
+    val collected: List<String> = emptyList(),
     val diagnostics: String? = null,
     val ytdlpVersion: String? = null,
     val toast: String? = null,
@@ -158,6 +159,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(customUrl = value) }
     }
 
+    fun openShortsPicker() {
+        if (!_state.value.signedIn) {
+            _state.update { it.copy(toast = "Сначала импортируй cookies.txt — без сессии лента будет чужой.") }
+            return
+        }
+        _state.update { it.copy(screen = Screen.SHORTS_PICKER, collected = emptyList()) }
+    }
+
+    fun collectShort(id: String) = _state.update {
+        if (id in it.collected) it else it.copy(collected = it.collected + id)
+    }
+
+    /** Собранные из живой ленты — сразу готовы к загрузке, проверять нечего. */
+    fun useCollected() {
+        val ids = _state.value.collected.filter { it !in store.ids() }
+        if (ids.isEmpty()) {
+            _state.update { it.copy(screen = Screen.DOWNLOAD, toast = "Всё это уже скачано.") }
+            return
+        }
+        val found = ids.map { id ->
+            Candidate(
+                id = id, title = "Шортс $id", channel = "", duration = 0,
+                views = 0, likes = 0, commentCount = 0, thumbUrl = null,
+                fromShortsFeed = true,
+            ).also { it.size = YtDlp.estimateSize(30) }
+        }
+        _state.update {
+            it.copy(
+                screen = Screen.DOWNLOAD,
+                found = found,
+                foundBytes = found.sumOf { c -> c.size },
+                jobState = JobState.READY,
+                jobMessage = "Из твоей ленты: ${found.size} шортсов",
+                downloaded = 0, downloadedBytes = 0, skipped = 0, downloadError = null,
+            )
+        }
+    }
+
     fun setFastSize(value: Boolean) {
         store.fastSize = value
         _state.update { it.copy(fastSize = value) }
@@ -218,14 +257,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
                 if (_state.value.fastSize) {
-                    // Берём только заведомо короткие: либо ссылка вида /shorts/,
-                    // либо известная длительность до трёх минут. Записи с пустым
-                    // duration раньше проскакивали и оказывались полнометражными.
-                    val sure = pool.filter {
-                        it.duration in 1..YtDlp.MAX_SHORT_SECONDS || it.fromShortsFeed
-                    }
+                    // Доверяем без проверки только шортсовым источникам: хэштегу
+                    // и вкладке /shorts. Короткая длительность ничего не доказывает —
+                    // горизонтальный ролик тоже бывает на сорок секунд.
+                    val sure = pool.filter { it.fromShortsFeed }
 
-                    // Если явных мало — досматриваем сомнительные обычным способом.
+                    // Остальное всё равно придётся запросить: соотношение сторон
+                    // в ленте не приходит, узнать его можно только у самого ролика.
                     val quick = if (sure.size >= wanted) {
                         sure.take(wanted)
                     } else {
@@ -238,7 +276,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     .awaitAll()
                             }
                             for ((c, pr) in part) {
-                                if (pr != null && pr.isShort && pr.size > 0) {
+                                if (pr != null && pr.isShort && pr.isVertical && pr.size > 0) {
                                     c.size = pr.size
                                     checked.add(c)
                                 }
@@ -250,8 +288,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
                     if (quick.isEmpty()) {
                         error(
-                            "В ленте ${pool.size} записей, но коротких среди них нет. " +
-                                "Возьми ленту #shorts или ссылку вида " +
+                            "В ленте ${pool.size} записей, вертикальных среди них нет. " +
+                                "Личные ленты состоят в основном из обычных видео — " +
+                                "для потока шортсов возьми ленту #shorts или ссылку " +
                                 "youtube.com/@канал/shorts."
                         )
                     }
@@ -366,10 +405,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     maxReplies = if (depth >= 100) 10 else 5,
                                 ) { }
                                 val thumb = YtDlp.thumbnail(
-                                    candidate.thumbUrl,
+                                    candidate.thumbUrl ?: result.thumbUrl,
                                     File(store.videosDir, "${candidate.id}.jpg"),
                                 )
-                                val saved = store.save(candidate, result.file, thumb, result.comments)
+                                // Название и лайки берём из info.json: у роликов,
+                                // собранных в ленте, их изначально нет.
+                                val enriched = candidate.copy(
+                                    title = result.title.ifBlank { candidate.title },
+                                    channel = result.channel.ifBlank { candidate.channel },
+                                    duration = if (result.duration > 0) result.duration else candidate.duration,
+                                    likes = if (result.likes > 0) result.likes else candidate.likes,
+                                    views = if (result.views > 0) result.views else candidate.views,
+                                    commentCount = if (result.commentCount > 0) result.commentCount
+                                        else candidate.commentCount,
+                                )
+                                val saved = store.save(enriched, result.file, thumb, result.comments)
                                 _state.update {
                                     it.copy(
                                         downloaded = it.downloaded + 1,

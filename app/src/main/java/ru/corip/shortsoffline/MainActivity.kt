@@ -23,6 +23,7 @@ import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
 import ru.corip.shortsoffline.ui.PlayerScreen
+import ru.corip.shortsoffline.ui.ShortsPickerScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
 
 class MainActivity : ComponentActivity() {
@@ -64,6 +65,13 @@ private fun App(vm: AppViewModel = viewModel()) {
             Screen.LOGIN -> LoginScreen(
                 onDone = { vm.finishLogin() },
                 onImport = { vm.importCookies(it) },
+            )
+            Screen.SHORTS_PICKER -> ShortsPickerScreen(
+                collected = state.collected,
+                target = state.count,
+                onCollect = { vm.collectShort(it) },
+                onDone = { vm.useCollected() },
+                onCancel = { vm.go(Screen.MENU) },
             )
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
             Screen.PLAYER -> PlayerScreen(state, vm)
