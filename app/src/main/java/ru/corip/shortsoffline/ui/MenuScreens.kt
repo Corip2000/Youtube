@@ -293,16 +293,27 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
             Slider(
                 value = state.count.toFloat(),
                 onValueChange = { vm.setCount(it.toInt()) },
-                valueRange = 0f..50f,
+                valueRange = 1f..200f,
                 colors = SliderDefaults.colors(
                     thumbColor = Palette.Signal,
                     activeTrackColor = Palette.Signal,
                     inactiveTrackColor = Palette.PanelHi,
                 ),
             )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SegButton("Столько и хватит", state.count > 0, Modifier.weight(1f)) {
+                    vm.setCount(20)
+                }
+                SegButton("Без предела", state.count == 0, Modifier.weight(1f)) {
+                    vm.setCount(0)
+                }
+            }
             if (state.count == 0) {
+                Spacer(Modifier.height(8.dp))
                 Text(
-                    "Лента будет листаться, пока ты не нажмёшь «Хватит».",
+                    "Лента будет листаться, пока ты не нажмёшь «Хватит». " +
+                        "Скачается всё, что успело набраться.",
                     style = Type.Small,
                 )
             }

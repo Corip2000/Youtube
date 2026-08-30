@@ -150,7 +150,9 @@ fun ShortsFeedScreen(
         // на значении из момента запуска и обновляться не будет.
         val mine = linkedSetOf<String>()
 
-        repeat(if (target > 0) 40 else 400) {
+        // Запас по шагам: за один заход лента отдаёт по нескольку роликов,
+        // но и повторы попадаются, поэтому берём с большим запасом.
+        repeat(if (target > 0) target * 4 + 30 else 600) {
             if (done) return@LaunchedEffect
             status = if (target > 0) "Собираю ленту: ${mine.size} из $target"
                 else "Собираю ленту: ${mine.size}, жми «Хватит» когда достаточно"

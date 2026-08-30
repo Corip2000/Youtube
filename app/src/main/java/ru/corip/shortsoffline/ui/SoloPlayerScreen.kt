@@ -6,16 +6,13 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -27,13 +24,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
@@ -47,26 +44,38 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * Просмотр одного видео с телефона.
  *
- * Управление то же, что в ленте: тап слева — назад на десять секунд,
- * справа — вперёд, по центру — пауза, удержание — ускорение вдвое.
+ * Экран отдан видео целиком: системные полосы убраны, подписей нет,
+ * полоска времени показывается только на паузе. Выход — свайп вниз.
+ *
+ * Управление: тап слева — назад на десять секунд, справа — вперёд,
+ * по центру — пауза, удержание — ускорение вдвое.
  */
 @OptIn(UnstableApi::class)
 @Composable
 fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
     val context = LocalContext.current
+    val activity = context.findActivity()
     val player = remember {
         ExoPlayer.Builder(context).build().apply { playWhenReady = true }
     }
     var progress by remember { mutableFloatStateOf(0f) }
     var holding by remember { mutableStateOf(false) }
+    var playing by remember { mutableStateOf(true) }
 
-    val activity = context.findActivity()
-
-    // Приложение заперто в вертикальном положении, а тут нужен поворот.
-    // Снимаем замок на время просмотра и возвращаем при выходе.
+    // Приложение заперто вертикально, а тут нужен поворот. Заодно убираем
+    // системные полосы — та самая белая внизу — чтобы видео было во весь экран.
     DisposableEffect(Unit) {
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
+        val controller = activity?.window?.let {
+            WindowInsetsControllerCompat(it, it.decorView)
+        }
+        controller?.apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
         onDispose {
+            controller?.show(WindowInsetsCompat.Type.systemBars())
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
             player.release()
         }
@@ -82,6 +91,10 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
                     if (videoSize.width > videoSize.height)
                         ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     else ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                playing = isPlaying
             }
         }
         player.addListener(listener)
@@ -123,6 +136,14 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .pointerInput(uri) {
+                    // Свайп вниз — выход. Никаких кнопок поверх картинки.
+                    var total = 0f
+                    detectVerticalDragGestures(
+                        onDragStart = { total = 0f },
+                        onDragEnd = { if (total > 120f) onClose() },
+                    ) { _, amount -> total += amount }
+                }
+                .pointerInput(uri) {
                     val third = size.width / 3f
                     detectTapGestures(
                         onPress = {
@@ -149,35 +170,23 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
                 }
         )
 
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .height(3.dp)
-                .background(Color.White.copy(alpha = 0.13f))
-        ) {
+        // Полоска времени — только на паузе.
+        if (!playing) {
             Box(
                 Modifier
-                    .fillMaxWidth(progress)
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
+                    .padding(horizontal = 20.dp)
                     .height(3.dp)
-                    .background(Palette.Signal)
-            )
-        }
-
-        Row(
-            Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(start = 16.dp, top = 14.dp)
-        ) {
-            Box(
-                Modifier
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .clickable { onClose() }
-                    .padding(horizontal = 9.dp, vertical = 5.dp)
+                    .background(Color.White.copy(alpha = 0.25f))
             ) {
-                Text("← Меню", style = Type.Label.copy(color = Color.White))
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .height(3.dp)
+                        .background(Palette.Signal)
+                )
             }
         }
 
@@ -185,23 +194,13 @@ fun SoloPlayerScreen(uri: String, onClose: () -> Unit) {
             Box(
                 Modifier
                     .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .padding(top = 56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(top = 24.dp)
+                    .background(Color.Black.copy(alpha = 0.55f))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text("\u00D72", style = Type.Data.copy(color = Palette.Jade))
             }
         }
-
-        Text(
-            "Слева −10 с · справа +10 с · удержание ×2",
-            style = Type.Label.copy(color = Color(0xFF9A93A8), letterSpacing = 0.sp),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 28.dp),
-        )
     }
 }
 

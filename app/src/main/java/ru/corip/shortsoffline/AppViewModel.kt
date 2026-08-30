@@ -259,7 +259,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissDiagnostics() = _state.update { it.copy(diagnostics = null) }
 
     /** 0 означает «без предела»: сбор идёт, пока не нажмёшь «Хватит». */
-    fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(0, 50)) }
+    fun setCount(count: Int) = _state.update { it.copy(count = count.coerceIn(0, 200)) }
 
     private fun refreshStorage() = _state.update {
         it.copy(
