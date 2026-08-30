@@ -1,6 +1,8 @@
 package ru.corip.shortsoffline.ui
 
 import android.annotation.SuppressLint
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -77,14 +79,30 @@ private const val JS_LOGGED_IN = """
 })()
 """
 
-private const val JS_ADVANCE = """
-(function(){
-  window.scrollBy(0, window.innerHeight);
-  var e = new KeyboardEvent('keydown', {key:'ArrowDown', keyCode:40, which:40, bubbles:true});
-  document.dispatchEvent(e); document.body.dispatchEvent(e);
-  return 'ok';
-})()
-"""
+/**
+ * Настоящий свайп пальцем по ленте. Прокрутка через JavaScript в плеере
+ * шортсов не работает — он слушает касания, а не скролл. Поэтому шлём
+ * браузеру полноценное событие движения, как если бы ты вёл пальцем.
+ */
+private fun WebView.swipeUp() {
+    val start = SystemClock.uptimeMillis()
+    val x = width / 2f
+    val from = height * 0.80f
+    val to = height * 0.20f
+    fun send(time: Long, action: Int, y: Float) {
+        MotionEvent.obtain(start, time, action, x, y, 0).also {
+            dispatchTouchEvent(it)
+            it.recycle()
+        }
+    }
+    send(start, MotionEvent.ACTION_DOWN, from)
+    var t = start
+    for (i in 1..12) {
+        t += 14
+        send(t, MotionEvent.ACTION_MOVE, from + (to - from) * i / 12f)
+    }
+    send(t + 14, MotionEvent.ACTION_UP, to)
+}
 
 private const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube"
 
@@ -116,27 +134,21 @@ fun ShortsFeedScreen(
     LaunchedEffect(web) {
         val view = web ?: return@LaunchedEffect
 
-        // Ждём загрузку и выясняем, узнал ли нас YouTube.
-        while (loggedIn == null) {
-            delay(1500)
-            view.evaluateJavascript(JS_LOGGED_IN) { r ->
-                when (r.trim('"')) {
-                    "yes" -> loggedIn = true
-                    "no" -> loggedIn = false
-                }
+        delay(3000)
+        // Вход показываем справочно и сбор им не перекрываем: определитель
+        // может ошибиться, а лента при этом работать.
+        view.evaluateJavascript(JS_LOGGED_IN) { r ->
+            when (r.trim('"')) {
+                "yes" -> loggedIn = true
+                "no" -> loggedIn = false
             }
-        }
-
-        if (loggedIn != true) {
-            status = "Войди в аккаунт — это нужно один раз"
-            return@LaunchedEffect
         }
 
         // Считаем сами: параметр collected внутри этого блока «заморожен»
         // на значении из момента запуска и обновляться не будет.
         val mine = linkedSetOf<String>()
 
-        repeat(30) { step ->
+        repeat(30) {
             if (done) return@LaunchedEffect
             status = "Собираю ленту: ${mine.size} из $target"
 
@@ -156,15 +168,10 @@ fun ShortsFeedScreen(
                 return@LaunchedEffect
             }
 
-            // Каждый третий шаг берём свежую порцию: имитация свайпа в плеере
-            // шортсов срабатывает не всегда, а перезагрузка ленты — всегда.
-            if (step % 3 == 2) {
-                view.loadUrl(FEED_URL)
-                delay(2200)
-            } else {
-                view.evaluateJavascript(JS_ADVANCE, null)
-                delay(1000)
-            }
+            // Листаем ту самую ленту, что на экране. Никаких перезагрузок:
+            // они подсовывали другую подборку вместо твоей.
+            view.swipeUp()
+            delay(1400)
         }
         done = true
         if (mine.isNotEmpty()) onDone() else status = "Лента ничего не отдала"
