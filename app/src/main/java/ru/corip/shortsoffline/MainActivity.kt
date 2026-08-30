@@ -21,6 +21,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import ru.corip.shortsoffline.ui.DownloadScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
+import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.PlayerScreen
 import ru.corip.shortsoffline.ui.ShortsFeedScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
@@ -60,6 +61,7 @@ private fun App(vm: AppViewModel = viewModel()) {
     ) {
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
+            Screen.LOGIN -> LoginScreen(onDone = { vm.go(Screen.MENU) })
             Screen.FEED -> ShortsFeedScreen(
                 collected = state.collected,
                 target = state.count,

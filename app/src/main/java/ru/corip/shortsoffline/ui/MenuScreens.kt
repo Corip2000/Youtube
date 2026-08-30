@@ -50,6 +50,7 @@ import ru.corip.shortsoffline.formatDuration
 @Composable
 fun MenuScreen(state: UiState, vm: AppViewModel) {
     var confirmClear by remember { mutableStateOf(false) }
+    var countAsk by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -96,11 +97,15 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
 
         Spacer(Modifier.height(24.dp))
 
-        AppButton("Моя лента шортсов", tail = "своя, скачается сама", primary = true) {
-            vm.openFeed()
-        }
+        AppButton("Вход в YouTube", tail = "один раз") { vm.openLogin() }
         Spacer(Modifier.height(10.dp))
-        AppButton("Другие источники", tail = "хэштег, свой канал") {
+        AppButton(
+            "Скачать рекомендации",
+            tail = "из твоей ленты",
+            primary = true,
+        ) { countAsk = true }
+        Spacer(Modifier.height(10.dp))
+        AppButton("Скачать по ссылке", tail = "канал или плейлист") {
             vm.go(Screen.DOWNLOAD)
         }
         Spacer(Modifier.height(10.dp))
@@ -160,6 +165,55 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
                     "Закрыть",
                     style = Type.Data.copy(color = Palette.Signal),
                     modifier = Modifier.clickable { vm.dismissDiagnostics() },
+                )
+            },
+        )
+    }
+
+    if (countAsk) {
+        AlertDialog(
+            onDismissRequest = { countAsk = false },
+            containerColor = Palette.Panel,
+            title = { Text("Сколько скачать", style = Type.Data) },
+            text = {
+                Column {
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("${state.count}", style = Type.Display.copy(fontSize = 40.sp))
+                        Text(
+                            "  шортсов",
+                            style = Type.Small,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                    }
+                    Slider(
+                        value = state.count.toFloat(),
+                        onValueChange = { vm.setCount(it.toInt()) },
+                        valueRange = 1f..50f,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Palette.Signal,
+                            activeTrackColor = Palette.Signal,
+                            inactiveTrackColor = Palette.PanelHi,
+                        ),
+                    )
+                    Text(
+                        "Столько роликов приложение пролистает в твоей ленте " +
+                            "и скачает. Лента идёт скрыто, смотреть ничего не нужно.",
+                        style = Type.Small,
+                    )
+                }
+            },
+            confirmButton = {
+                Text(
+                    "Начать",
+                    style = Type.Data.copy(color = Palette.Signal),
+                    modifier = Modifier.clickable { countAsk = false; vm.openFeed() },
+                )
+            },
+            dismissButton = {
+                Text(
+                    "Отмена",
+                    style = Type.Data.copy(color = Palette.Muted),
+                    modifier = Modifier.clickable { countAsk = false },
                 )
             },
         )

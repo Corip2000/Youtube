@@ -105,13 +105,12 @@ private fun WebView.swipeUp() {
     send(t + 14, MotionEvent.ACTION_UP, to)
 }
 
-private const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube"
 
 private const val FEED_URL = "https://m.youtube.com/shorts"
 
 // Обычный мобильный Chrome: встроенный браузер по умолчанию помечает себя
 // как «wv», и по этой метке Google отказывает во входе.
-private const val UA =
+const val UA =
     "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
 
@@ -129,9 +128,8 @@ fun ShortsFeedScreen(
     var status by remember { mutableStateOf("Открываю ленту…") }
     var done by remember { mutableStateOf(false) }
     var found by remember { mutableStateOf(0) }
-    // Лента работает скрыто: смотреть ролики заранее не нужно, они и так
-    // окажутся в плеере. Браузер показываем только на время входа.
-    var showBrowser by remember { mutableStateOf(false) }
+    // Лента работает скрыто: смотреть ролики заранее не нужно.
+    val showBrowser = false
 
     DisposableEffect(Unit) { onDispose { web?.destroy() } }
 
@@ -218,22 +216,6 @@ fun ShortsFeedScreen(
         }
         Spacer(Modifier.height(12.dp))
 
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .padding(bottom = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            AppButton("Войти в Google", Modifier.weight(1f)) {
-                showBrowser = true
-                web?.loadUrl(LOGIN_URL)
-            }
-            AppButton("Готово, скрыть", Modifier.weight(1f)) {
-                showBrowser = false
-                web?.loadUrl(FEED_URL)
-            }
-        }
 
         if (found > 0 && !done) {
             Box(
@@ -295,7 +277,7 @@ fun ShortsFeedScreen(
                     Spacer(Modifier.height(20.dp))
                     Text(
                         if (loggedIn == false)
-                            "YouTube не узнаёт тебя. Нажми «Войти в Google»."
+                            "YouTube не узнаёт тебя. Вернись и нажми «Вход в YouTube»."
                         else "Листаю твою ленту и запоминаю ролики. Смотреть их сейчас не нужно.",
                         style = Type.Small.copy(
                             color = if (loggedIn == false) Palette.Signal else Palette.Muted

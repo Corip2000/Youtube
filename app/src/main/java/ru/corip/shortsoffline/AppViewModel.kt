@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, FEED, DOWNLOAD, PLAYER }
+enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, PLAYER }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
 data class UiState(
@@ -102,6 +102,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------ моя лента
+
+    fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }
 
     fun openFeed() = _state.update {
         it.copy(screen = Screen.FEED, collected = emptyList())
