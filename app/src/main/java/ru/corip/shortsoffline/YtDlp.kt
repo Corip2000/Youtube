@@ -18,7 +18,14 @@ import java.net.URL
 object YtDlp {
 
     // Готовый прогрессивный mp4: одна дорожка, склейка ffmpeg не нужна.
-    private const val FORMAT = "b[ext=mp4]/b"
+    // Один жёсткий формат не годится: для части роликов YouTube готовый файл
+    // со звуком больше не отдаёт, только раздельные дорожки. Поэтому цепочка:
+    // сначала одиночный mp4, потом склейка, в конце что угодно подходящее.
+    private const val FORMAT_MERGE =
+        "b[ext=mp4][acodec!=none]/bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b"
+    private const val FORMAT_PLAIN = "b[acodec!=none][vcodec!=none]/b"
+
+    private fun format() = if (ffmpegReady) FORMAT_MERGE else FORMAT_PLAIN
 
     /** Шортсом считаем вертикальное видео не длиннее трёх минут. */
     const val MAX_SHORT_SECONDS = 180
