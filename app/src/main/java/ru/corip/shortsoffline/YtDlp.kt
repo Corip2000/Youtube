@@ -125,10 +125,8 @@ object YtDlp {
     // ------------------------------------------------------------------ ленты
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
-        // Всё, что требовало входа, убрано: сессия через WebView не создаётся,
-        // Google её блокирует. Остались источники, работающие без входа —
-        // и они отдают только вертикальные ролики.
-        HASHTAG("https://www.youtube.com/hashtag/shorts", "Хэштег #shorts", false),
+        // Хэштег убран: он отдавал популярный мусор и одно и то же.
+        // Основной источник — твоя лента, она живёт на отдельном экране.
         CUSTOM("", "Своя ссылка", false),
     }
 
@@ -220,8 +218,7 @@ object YtDlp {
             // Хэштег #shorts и вкладка /shorts отдают только вертикальные ролики —
             // такие источники можно не перепроверять. Личные ленты перемешаны
             // с обычными видео, там без запроса не отличить.
-            val guaranteed = feed == Feed.HASHTAG ||
-                (feed == Feed.CUSTOM && target.contains("/shorts"))
+            val guaranteed = feed == Feed.CUSTOM && target.contains("/shorts")
 
             val direct = mutableListOf<Candidate>()
             var longOnes = 0
@@ -236,7 +233,7 @@ object YtDlp {
             if (direct.isEmpty()) {
                 error(
                     "В ленте ${entries.length()} роликов, из них длиннее трёх минут $longOnes. " +
-                        "Коротких нет — попробуй ленту #shorts или свою ссылку на канал."
+                        "Коротких нет — дай ссылку вида youtube.com/@канал/shorts."
                 )
             }
             direct.shuffled()
@@ -397,6 +394,7 @@ object YtDlp {
         dir: File,
         maxTop: Int,
         maxReplies: Int,
+        requireVertical: Boolean,
         onProgress: (Float) -> Unit,
     ): Downloaded = withContext(Dispatchers.IO) {
         dir.mkdirs()
@@ -408,8 +406,14 @@ object YtDlp {
             addOption("--retries", "2")
             // Последний рубеж: даже если длинный ролик проскочил фильтры,
             // yt-dlp откажется его качать.
-            // Последний рубеж: длинное или горизонтальное yt-dlp не возьмёт.
-            addOption("--match-filter", "duration <= $MAX_SHORT_SECONDS & height > width")
+            // Для роликов из твоей ленты это заведомо шортсы, и требовать
+            // размеры кадра нельзя: yt-dlp их не всегда знает, а тогда фильтр
+            // отбрасывал вообще всё.
+            addOption(
+                "--match-filter",
+                if (requireVertical) "duration <= $MAX_SHORT_SECONDS & height > width"
+                else "duration <= $MAX_SHORT_SECONDS",
+            )
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
             addOption("--write-info-json")
             if (maxTop > 0) {

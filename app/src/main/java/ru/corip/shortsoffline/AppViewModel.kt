@@ -33,7 +33,7 @@ data class UiState(
     val sessionFreed: Long = 0,
     val showReceipt: Boolean = false,
 
-    val feed: YtDlp.Feed = YtDlp.Feed.HASHTAG,
+    val feed: YtDlp.Feed = YtDlp.Feed.CUSTOM,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
     val jobMessage: String = "",
@@ -77,7 +77,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val watched = mutableSetOf<String>()
 
     init {
-        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.HASHTAG)
+        val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.CUSTOM)
         _state.update {
             it.copy(
                 feed = saved,
@@ -364,6 +364,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     candidate.id, store.videosDir,
                                     maxTop = depth,
                                     maxReplies = if (depth >= 100) 10 else 5,
+                                    requireVertical = !candidate.fromShortsFeed,
                                 ) { }
                                 val thumb = YtDlp.thumbnail(
                                     candidate.thumbUrl ?: result.thumbUrl,

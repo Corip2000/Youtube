@@ -30,6 +30,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
 
@@ -128,6 +129,9 @@ fun ShortsFeedScreen(
     var status by remember { mutableStateOf("Открываю ленту…") }
     var done by remember { mutableStateOf(false) }
     var found by remember { mutableStateOf(0) }
+    // Лента работает скрыто: смотреть ролики заранее не нужно, они и так
+    // окажутся в плеере. Браузер показываем только на время входа.
+    var showBrowser by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) { onDispose { web?.destroy() } }
 
@@ -221,8 +225,14 @@ fun ShortsFeedScreen(
                 .padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            AppButton("Войти в Google", Modifier.weight(1f)) { web?.loadUrl(LOGIN_URL) }
-            AppButton("К ленте", Modifier.weight(1f)) { web?.loadUrl(FEED_URL) }
+            AppButton("Войти в Google", Modifier.weight(1f)) {
+                showBrowser = true
+                web?.loadUrl(LOGIN_URL)
+            }
+            AppButton("Готово, скрыть", Modifier.weight(1f)) {
+                showBrowser = false
+                web?.loadUrl(FEED_URL)
+            }
         }
 
         if (found > 0 && !done) {
@@ -246,22 +256,53 @@ fun ShortsFeedScreen(
                 .background(Palette.Edge)
         )
 
-        AndroidView(
-            factory = { ctx ->
-                CookieManager.getInstance().setAcceptCookie(true)
-                WebView(ctx).apply {
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.databaseEnabled = true
-                    settings.userAgentString = UA
-                    webViewClient = WebViewClient()
-                    webChromeClient = WebChromeClient()
-                    loadUrl(FEED_URL)
-                    web = this
+        Box(Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    CookieManager.getInstance().setAcceptCookie(true)
+                    WebView(ctx).apply {
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.databaseEnabled = true
+                        settings.userAgentString = UA
+                        webViewClient = WebViewClient()
+                        webChromeClient = WebChromeClient()
+                        loadUrl(FEED_URL)
+                        web = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            // Заслонка. Браузер под ней живой и нужного размера — иначе свайпы
+            // некуда слать, — но ролики ты не видишь.
+            if (!showBrowser) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Palette.Void)
+                        .padding(28.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        "$found",
+                        style = Type.Display.copy(fontSize = 64.sp, color = Palette.Jade),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("собрано из $target", style = Type.Small)
+                    Spacer(Modifier.height(20.dp))
+                    Text(
+                        if (loggedIn == false)
+                            "YouTube не узнаёт тебя. Нажми «Войти в Google»."
+                        else "Листаю твою ленту и запоминаю ролики. Смотреть их сейчас не нужно.",
+                        style = Type.Small.copy(
+                            color = if (loggedIn == false) Palette.Signal else Palette.Muted
+                        ),
+                    )
                 }
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+            }
+        }
     }
 }
