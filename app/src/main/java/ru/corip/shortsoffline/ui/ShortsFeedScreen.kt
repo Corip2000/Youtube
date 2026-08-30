@@ -44,14 +44,25 @@ import kotlinx.coroutines.delay
  * ролики публичные.
  */
 
-/** Номера роликов лежат в данных страницы как "videoId":"XXXXXXXXXXX". */
+/**
+ * Берём только настоящие шортсы. Подстрока "videoId" встречается на странице
+ * повсюду — в рекламе, служебных блоках, боковых подборках, — поэтому ищем
+ * ссылку вида /shorts/ID и переходы reelWatchEndpoint, которыми помечены
+ * именно ролики ленты.
+ */
 private const val JS_EXTRACT = """
 (function(){
   var found = [], seen = {};
-  var re = /"videoId":"([A-Za-z0-9_-]{11})"/g;
-  var html = document.documentElement.innerHTML, m;
-  while ((m = re.exec(html)) !== null) {
-    if (!seen[m[1]]) { seen[m[1]] = 1; found.push(m[1]); }
+  var html = document.documentElement.innerHTML;
+  var patterns = [
+    /\/shorts\/([A-Za-z0-9_-]{11})/g,
+    /"reelWatchEndpoint":\{"videoId":"([A-Za-z0-9_-]{11})"/g
+  ];
+  for (var p = 0; p < patterns.length; p++) {
+    var m;
+    while ((m = patterns[p].exec(html)) !== null) {
+      if (!seen[m[1]]) { seen[m[1]] = 1; found.push(m[1]); }
+    }
   }
   return found.join(",");
 })()
@@ -75,6 +86,8 @@ private const val JS_ADVANCE = """
 })()
 """
 
+private const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube"
+
 private const val FEED_URL = "https://m.youtube.com/shorts"
 
 // Обычный мобильный Chrome: встроенный браузер по умолчанию помечает себя
@@ -96,6 +109,7 @@ fun ShortsFeedScreen(
     var loggedIn by remember { mutableStateOf<Boolean?>(null) }
     var status by remember { mutableStateOf("Открываю ленту…") }
     var done by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf(0) }
 
     DisposableEffect(Unit) { onDispose { web?.destroy() } }
 
@@ -118,26 +132,42 @@ fun ShortsFeedScreen(
             return@LaunchedEffect
         }
 
-        // Вход есть: собираем ролики сами, листать вручную не нужно.
-        repeat(40) {
+        // Считаем сами: параметр collected внутри этого блока «заморожен»
+        // на значении из момента запуска и обновляться не будет.
+        val mine = linkedSetOf<String>()
+
+        repeat(30) { step ->
             if (done) return@LaunchedEffect
-            status = "Собираю ленту: ${collected.size} из $target"
+            status = "Собираю ленту: ${mine.size} из $target"
+
             view.evaluateJavascript(JS_EXTRACT) { raw ->
                 raw.trim('"').replace("\\\"", "").split(",")
                     .filter { id -> id.length == 11 }
-                    .forEach(onCollect)
+                    .forEach { id ->
+                        if (mine.add(id)) onCollect(id)
+                    }
             }
-            delay(500)
-            if (collected.size >= target) {
+            delay(600)
+            found = mine.size
+
+            if (mine.size >= target) {
                 done = true
                 onDone()
                 return@LaunchedEffect
             }
-            view.evaluateJavascript(JS_ADVANCE, null)
-            delay(900)
+
+            // Каждый третий шаг берём свежую порцию: имитация свайпа в плеере
+            // шортсов срабатывает не всегда, а перезагрузка ленты — всегда.
+            if (step % 3 == 2) {
+                view.loadUrl(FEED_URL)
+                delay(2200)
+            } else {
+                view.evaluateJavascript(JS_ADVANCE, null)
+                delay(1000)
+            }
         }
         done = true
-        if (collected.isNotEmpty()) onDone() else status = "Лента ничего не отдала"
+        if (mine.isNotEmpty()) onDone() else status = "Лента ничего не отдала"
     }
 
     Column(
@@ -171,20 +201,31 @@ fun ShortsFeedScreen(
 
         Box(Modifier.padding(horizontal = 18.dp)) {
             Bar(
-                if (target > 0) collected.size.toFloat() / target else 0f,
+                if (target > 0) found.toFloat() / target else 0f,
                 color = Palette.Jade,
             )
         }
         Spacer(Modifier.height(12.dp))
 
-        if (collected.isNotEmpty() && !done) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp)
+                .padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AppButton("Войти в Google", Modifier.weight(1f)) { web?.loadUrl(LOGIN_URL) }
+            AppButton("К ленте", Modifier.weight(1f)) { web?.loadUrl(FEED_URL) }
+        }
+
+        if (found > 0 && !done) {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp)
                     .padding(bottom = 12.dp)
             ) {
-                AppButton("Хватит, качаем", tail = "${collected.size}", primary = true) {
+                AppButton("Хватит, качаем", tail = "$found", primary = true) {
                     done = true
                     onDone()
                 }
