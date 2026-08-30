@@ -74,7 +74,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private var jobHandle: Job? = null
-    private val watched = mutableSetOf<String>()
 
     init {
         val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.CUSTOM)
@@ -448,7 +447,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------ плеер
 
     fun openPlayer() {
-        watched.clear()
         _state.update {
             it.copy(
                 screen = Screen.PLAYER, queue = store.all(), index = 0,
@@ -458,34 +456,33 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun markWatched() {
-        _state.value.current?.let { watched.add(it.id) }
-    }
-
+    /** Листание больше ничего не стирает — удаление только по двойному нажатию. */
     fun advance(direction: Int) {
         val s = _state.value
-        val current = s.current
-        if (direction > 0 && current != null && current.id in watched) {
-            val freed = store.delete(current.id)
-            watched.remove(current.id)
-            val queue = s.queue.filterNot { it.id == current.id }
-            _state.update {
-                it.copy(
-                    queue = queue,
-                    index = if (it.index >= queue.size) 0 else it.index,
-                    sessionDeleted = it.sessionDeleted + 1,
-                    sessionFreed = it.sessionFreed + freed,
-                    commentsOpen = false, comments = emptyList(),
-                )
-            }
-            refreshStorage()
-            if (queue.isEmpty()) exitPlayer()
-            return
-        }
         val size = s.queue.size
         if (size == 0) return
         val next = ((s.index + direction) % size + size) % size
         _state.update { it.copy(index = next, commentsOpen = false, comments = emptyList()) }
+    }
+
+    /** Двойное нажатие по видео: стереть с диска и перейти к следующему. */
+    fun deleteCurrent() {
+        val s = _state.value
+        val current = s.current ?: return
+        val freed = store.delete(current.id)
+        val queue = s.queue.filterNot { it.id == current.id }
+        _state.update {
+            it.copy(
+                queue = queue,
+                index = if (it.index >= queue.size) 0 else it.index,
+                sessionDeleted = it.sessionDeleted + 1,
+                sessionFreed = it.sessionFreed + freed,
+                commentsOpen = false, comments = emptyList(),
+                toast = "Удалено · освобождено ${formatBytes(freed)}",
+            )
+        }
+        refreshStorage()
+        if (queue.isEmpty()) exitPlayer()
     }
 
     fun openComments() {

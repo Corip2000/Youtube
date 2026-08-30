@@ -67,7 +67,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            "Качает случайные шортсы вместе с комментами. Смотришь без сети — просмотренное стирается.",
+            "Качает шортсы вместе с комментами. Смотришь без сети, удаляешь двойным нажатием.",
             style = Type.Small,
         )
 
@@ -303,8 +303,9 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
             Spacer(Modifier.height(8.dp))
             Text(
                 if (state.fastSize)
-                    "Считается по длительности, без запроса к каждому ролику. " +
-                        "Ошибка обычно в пределах трети."
+                    "Считается по длительности. У роликов из ленты она заранее " +
+                        "неизвестна, поэтому вес у всех выходит одинаковый — " +
+                        "настоящий появится после загрузки."
                 else "Точный размер, но приложение опрашивает каждый ролик отдельно.",
                 style = Type.Small,
             )
@@ -410,7 +411,7 @@ private fun JobPanel(state: UiState, vm: AppViewModel) {
                         )
                         Text(
                             (if (item.duration > 0) formatDuration(item.duration) + " · " else "") +
-                                formatBytes(item.size),
+                                (if (state.fastSize) "~" else "") + formatBytes(item.size),
                             style = Type.Small.copy(
                                 // Длиннее трёх минут — не шортс, подсвечиваем.
                                 color = if (item.duration > 180) Palette.Signal else Palette.Ink

@@ -31,6 +31,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -80,10 +82,7 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) {
-                    vm.markWatched()
-                    vm.advance(1)
-                }
+                if (playbackState == Player.STATE_ENDED) vm.advance(1)
             }
         }
         player.addListener(listener)
@@ -98,13 +97,13 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
     }
 
     var progress by remember { mutableFloatStateOf(0f) }
+    var holding by remember { mutableStateOf(false) }
     LaunchedEffect(current?.id) {
         while (true) {
             val duration = player.duration
             if (duration > 0) {
                 val p = player.currentPosition.toFloat() / duration
                 progress = p.coerceIn(0f, 1f)
-                if (p > 0.9f) vm.markWatched()
             }
             delay(200)
         }
@@ -142,9 +141,25 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
                     ) { _, amount -> total += amount }
                 }
                 .pointerInput(current?.id) {
-                    detectTapGestures {
-                        if (player.isPlaying) player.pause() else player.play()
-                    }
+                    detectTapGestures(
+                        onPress = {
+                            // Держишь — ускорение вдвое, отпустил — обычная скорость.
+                            val quick = withTimeoutOrNull(280) { tryAwaitRelease() }
+                            if (quick == null) {
+                                holding = true
+                                player.setPlaybackSpeed(2f)
+                                tryAwaitRelease()
+                                player.setPlaybackSpeed(1f)
+                                holding = false
+                            }
+                        },
+                        onDoubleTap = { vm.deleteCurrent() },
+                        onTap = {
+                            if (!holding) {
+                                if (player.isPlaying) player.pause() else player.play()
+                            }
+                        },
+                    )
                 }
         )
 
@@ -176,6 +191,20 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
             )
         }
 
+        if (holding) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("\u00D72", style = Type.Data.copy(color = Palette.Jade))
+            }
+        }
+
         // Верхние метки
         Row(
             Modifier
@@ -203,6 +232,11 @@ fun PlayerScreen(state: UiState, vm: AppViewModel) {
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(4.dp))
+                Text(
+                    "Двойное нажатие — удалить · удержание — ускорение \u00D72",
+                    style = Type.Label.copy(color = Color(0xFF9A93A8), letterSpacing = 0.sp),
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
                     current?.title.orEmpty(),
                     style = Type.Body.copy(
