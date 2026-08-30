@@ -345,82 +345,96 @@ object YtDlp {
      * собираем ветки сами. В отличие от Data API здесь реально доступны
      * все [maxReplies] ответов, а не только первые пять.
      */
-    suspend fun comments(
-        id: String,
-        maxTop: Int = 100,
-        maxReplies: Int = 10,
-    ): List<Comment> = withContext(Dispatchers.IO) {
-        runCatching {
-            val req = request(url(id), null).apply {
-                addOption("--dump-single-json")
-                addOption("--skip-download")
-                addOption("--write-comments")
-                addOption(
-                    "--extractor-args",
-                    "youtube:comment_sort=top;max_comments=all,$maxTop,all,$maxReplies",
+    /** Разбор комментариев из готового JSON — общий для обоих путей. */
+    private fun commentsFrom(root: JSONObject, maxTop: Int, maxReplies: Int): List<Comment> {
+        val arr = root.optJSONArray("comments") ?: return emptyList()
+        val tops = LinkedHashMap<String, MutableList<Reply>>()
+        val meta = LinkedHashMap<String, Comment>()
+
+        for (i in 0 until arr.length()) {
+            val c = arr.optJSONObject(i) ?: continue
+            val cid = c.optString("id")
+            if (cid.isBlank()) continue
+            val author = c.optString("author").removePrefix("@")
+            val text = c.optString("text")
+            val likes = c.optLong("like_count")
+            val parent = c.optString("parent")
+
+            if (parent.isBlank() || parent == "root") {
+                meta[cid] = Comment(author, text, likes, 0, emptyList())
+                tops.getOrPut(cid) { mutableListOf() }
+            } else {
+                val root2 = parent.substringBefore('.')
+                tops.getOrPut(root2) { mutableListOf() }.add(Reply(author, text, likes))
+            }
+        }
+
+        return meta.entries
+            .map { (cid, c) ->
+                val replies = tops[cid].orEmpty()
+                c.copy(
+                    replyCount = replies.size,
+                    replies = replies.sortedByDescending { it.likes }.take(maxReplies),
                 )
             }
-            val arr = parse(run(req))
-                .optJSONArray("comments") ?: return@withContext emptyList()
-
-            val tops = LinkedHashMap<String, MutableList<Reply>>()
-            val meta = LinkedHashMap<String, Comment>()
-
-            for (i in 0 until arr.length()) {
-                val c = arr.optJSONObject(i) ?: continue
-                val cid = c.optString("id")
-                if (cid.isBlank()) continue
-                val author = c.optString("author").removePrefix("@")
-                val text = c.optString("text")
-                val likes = c.optLong("like_count")
-                val parent = c.optString("parent")
-
-                if (parent.isBlank() || parent == "root") {
-                    meta[cid] = Comment(author, text, likes, 0, emptyList())
-                    tops.getOrPut(cid) { mutableListOf() }
-                } else {
-                    // id ответа выглядит как "<родитель>.<свой>"
-                    val root = parent.substringBefore('.')
-                    tops.getOrPut(root) { mutableListOf() }.add(Reply(author, text, likes))
-                }
-            }
-
-            meta.entries
-                .map { (cid, c) ->
-                    val replies = tops[cid].orEmpty()
-                    c.copy(
-                        replyCount = replies.size,
-                        replies = replies.sortedByDescending { it.likes }.take(maxReplies),
-                    )
-                }
-                .sortedByDescending { it.likes }
-                .take(maxTop)
-        }.getOrDefault(emptyList())
+            .sortedByDescending { it.likes }
+            .take(maxTop)
     }
 
-    // ----------------------------------------------------------------- загрузка
+    private fun commentArgs(maxTop: Int, maxReplies: Int) =
+        "youtube:comment_sort=top;max_comments=all,$maxTop,all,$maxReplies"
 
+    class Downloaded(val file: File, val comments: List<Comment>)
+
+    /**
+     * Скачивание и комментарии одним запуском yt-dlp.
+     * Раньше это были два отдельных процесса: каждый заново поднимал питон
+     * и заново разбирал страницу ролика. Один запуск экономит примерно половину
+     * времени на каждом видео.
+     */
     suspend fun download(
         id: String,
         dir: File,
+        maxTop: Int,
+        maxReplies: Int,
         onProgress: (Float) -> Unit,
-    ): File = withContext(Dispatchers.IO) {
+    ): Downloaded = withContext(Dispatchers.IO) {
         dir.mkdirs()
         val req = request(url(id), null).apply {
             addOption("-f", format())
             addOption("-o", File(dir, "%(id)s.%(ext)s").absolutePath)
             addOption("--no-mtime")
+            addOption("--concurrent-fragments", "4")
+            addOption("--retries", "2")
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
+            if (maxTop > 0) {
+                addOption("--write-info-json")
+                addOption("--write-comments")
+                addOption("--extractor-args", commentArgs(maxTop, maxReplies))
+            }
         }
         YoutubeDL.getInstance().execute(req, id) { progress, _, _ ->
             onProgress((progress / 100f).coerceIn(0f, 1f))
         }
-        dir.listFiles { f ->
+
+        val video = dir.listFiles { f ->
             f.name.startsWith("$id.") &&
                 !f.name.endsWith(".part") && !f.name.endsWith(".ytdl") &&
                 !f.name.endsWith(".json") && !f.name.endsWith(".jpg")
         }?.maxByOrNull { it.length() }
             ?: throw IllegalStateException("yt-dlp отработал, но файла нет.")
+
+        // yt-dlp кладёт комментарии в info.json рядом с видео.
+        val info = File(dir, "$id.info.json")
+        val comments = if (info.exists()) {
+            val parsed = runCatching {
+                commentsFrom(JSONObject(info.readText()), maxTop, maxReplies)
+            }.getOrDefault(emptyList())
+            info.delete()
+            parsed
+        } else emptyList()
+
+        Downloaded(video, comments)
     }
 
     fun cancel(id: String) = runCatching { YoutubeDL.getInstance().destroyProcessById(id) }

@@ -314,6 +314,33 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
             )
         }
 
+        Spacer(Modifier.height(12.dp))
+
+        Panel {
+            Text("КОММЕНТАРИИ", style = Type.Label)
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SegButton("100 + 10", state.commentDepth == 100, Modifier.weight(1f)) {
+                    vm.setCommentDepth(100)
+                }
+                SegButton("30 + 5", state.commentDepth == 30, Modifier.weight(1f)) {
+                    vm.setCommentDepth(30)
+                }
+                SegButton("Без них", state.commentDepth == 0, Modifier.weight(1f)) {
+                    vm.setCommentDepth(0)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                when (state.commentDepth) {
+                    100 -> "Полный набор. Самый медленный режим: комментарии тянутся страницами."
+                    0 -> "Быстрее всего — комментарии не загружаются совсем."
+                    else -> "Разумная середина: заметно быстрее, а верхушку обсуждения видно."
+                },
+                style = Type.Small,
+            )
+        }
+
         Spacer(Modifier.height(20.dp))
 
         val searching = state.jobState == JobState.SEARCHING

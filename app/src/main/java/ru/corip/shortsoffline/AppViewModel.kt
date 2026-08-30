@@ -5,6 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,6 +55,7 @@ data class UiState(
     val commentsOpen: Boolean = false,
 
     val customUrl: String = "",
+    val commentDepth: Int = 30,
     val diagnostics: String? = null,
     val ytdlpVersion: String? = null,
     val toast: String? = null,
@@ -76,7 +80,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
         _state.update {
-            it.copy(feed = saved, signedIn = Cookies.isSignedIn(app), customUrl = store.customTarget)
+            it.copy(
+                feed = saved,
+                signedIn = Cookies.isSignedIn(app),
+                customUrl = store.customTarget,
+                commentDepth = store.commentDepth,
+            )
         }
         refreshStorage()
         viewModelScope.launch {
@@ -145,6 +154,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(customUrl = value) }
     }
 
+    fun setCommentDepth(value: Int) {
+        store.commentDepth = value
+        _state.update { it.copy(commentDepth = value) }
+    }
+
     fun runDiagnostics() = viewModelScope.launch {
         _state.update { it.copy(diagnostics = "Проверяю…") }
         val report = YtDlp.diagnose(getApplication(), cookies())
@@ -200,10 +214,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 var noProbe = 0
                 var notShort = 0
                 var notVertical = 0
-                for (candidate in pool) {
+
+                // Вес считаем пачками по четыре: каждый запрос — отдельный запуск
+                // yt-dlp с ожиданием сети, последовательно это тянулось минутами.
+                val probed = mutableListOf<Pair<Candidate, YtDlp.Probe?>>()
+                for (chunk in pool.chunked(4)) {
+                    if (probed.count { it.second != null } >= wanted * 2) break
+                    val part = coroutineScope {
+                        chunk.map { c -> async(Dispatchers.IO) { c to YtDlp.probe(c.id) } }.awaitAll()
+                    }
+                    probed.addAll(part)
+                    _state.update { it.copy(checked = it.checked + chunk.size) }
+                }
+
+                for ((candidate, probe) in probed) {
                     if (picked.size >= wanted) break
-                    val probe = YtDlp.probe(candidate.id)
-                    _state.update { it.copy(checked = it.checked + 1) }
                     if (probe == null || probe.size <= 0) { noProbe++; continue }
                     if (!probe.isShort) { notShort++; continue }
                     // Из вкладки /shorts всё вертикальное по определению,
@@ -261,14 +286,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     it.copy(currentTitle = candidate.title, currentId = candidate.id, currentProgress = 0f)
                 }
                 runCatching {
-                    val file = YtDlp.download(candidate.id, store.videosDir) { p ->
-                        _state.update { it.copy(currentProgress = p) }
-                    }
+                    val depth = _state.value.commentDepth
+                    val result = YtDlp.download(
+                        candidate.id, store.videosDir,
+                        maxTop = depth,
+                        maxReplies = if (depth >= 100) 10 else 5,
+                    ) { p -> _state.update { it.copy(currentProgress = p) } }
                     val thumb = YtDlp.thumbnail(
                         candidate.thumbUrl, File(store.videosDir, "${candidate.id}.jpg")
                     )
-                    val comments = YtDlp.comments(candidate.id)
-                    val saved = store.save(candidate, file, thumb, comments)
+                    val saved = store.save(candidate, result.file, thumb, result.comments)
                     _state.update {
                         it.copy(
                             downloaded = it.downloaded + 1,

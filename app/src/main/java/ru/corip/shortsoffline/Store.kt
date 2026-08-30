@@ -72,6 +72,11 @@ class Store(context: Context) {
     // ---------- настройки ----------
 
     /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
+    /** Сколько комментариев тянуть: 100, 30 или 0 (не тянуть вовсе). */
+    var commentDepth: Int
+        get() = prefs.getInt("comment_depth", 30)
+        set(v) = prefs.edit().putInt("comment_depth", v).apply()
+
     var customTarget: String
         get() = prefs.getString("custom_target", "") ?: ""
         set(v) = prefs.edit().putString("custom_target", v.trim()).apply()
