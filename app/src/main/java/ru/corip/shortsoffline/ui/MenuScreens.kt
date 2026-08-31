@@ -158,13 +158,6 @@ private fun VideoTab(
     AppButton("Открыть видео с телефона", tail = "посмотреть тут") {
         picker.launch(arrayOf("video/*"))
     }
-    Spacer(Modifier.height(10.dp))
-    AppButton(
-        "Смотреть скачанное",
-        tail = if (state.savedCount > 0)
-            "${state.savedCount} · ${formatBytes(state.savedBytes)}" else "пусто",
-        enabled = state.savedCount > 0,
-    ) { vm.openPlayer() }
 
     Spacer(Modifier.height(16.dp))
 
@@ -253,11 +246,20 @@ private fun PlatformTab(state: UiState, vm: AppViewModel, platform: YtDlp.Platfo
         vm.go(Screen.DOWNLOAD)
     }
 
+    Spacer(Modifier.height(10.dp))
+
+    val saved = state.savedByPlatform[platform.name] ?: (0 to 0L)
+    AppButton(
+        "Смотреть скачанное",
+        tail = if (saved.first > 0) "${saved.first} · ${formatBytes(saved.second)}" else "пусто",
+        enabled = saved.first > 0,
+    ) { vm.openPlayer(platform) }
+
     Spacer(Modifier.height(18.dp))
     Text(
         "Приложение открывает твою ленту ${platform.title} скрыто, листает её " +
             "и запоминает ролики. Смотреть их заранее не нужно — они окажутся " +
-            "в плеере. Нужен вход в аккаунт.",
+            "в плеере. Скачанное здесь отдельное: ролики площадок не смешиваются.",
         style = Type.Small,
     )
 }

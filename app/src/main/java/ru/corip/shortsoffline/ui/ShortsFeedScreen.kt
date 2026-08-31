@@ -305,6 +305,12 @@ fun ShortsFeedScreen(
                         settings.databaseEnabled = true
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
+                        // Нам нужен только код страницы со ссылками. Картинки и
+                        // ролики не грузим: именно они съедали память и роняли
+                        // приложение на длинной ленте.
+                        settings.blockNetworkImage = true
+                        settings.loadsImagesAutomatically = false
+                        settings.mediaPlaybackRequiresUserGesture = true
                         settings.userAgentString = platform.userAgent(desktop)
                         webViewClient = object : WebViewClient() {
                         override fun onReceivedError(

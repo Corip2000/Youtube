@@ -225,6 +225,20 @@ object YtDlp {
             report.append("Версия yt-dlp: ").append(version(context) ?: "неизвестна").append("\n")
         }.onFailure { report.append("Версия yt-dlp: не определилась\n") }
 
+        // Через какую страну идёт трафик — так видно, поднят ли VPN.
+        report.append("\n")
+        runCatching {
+            val conn = URL("https://ipinfo.io/json").openConnection() as HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            val o = JSONObject(body)
+            report.append("Выход в сеть: ")
+                .append(o.optString("country").ifBlank { "?" })
+                .append(", ").append(o.optString("org").take(40))
+                .append("\n")
+        }.onFailure { report.append("Страну определить не вышло: ${it.message}\n") }
+
         report.append("\n")
         runCatching {
             val json = flat("https://www.youtube.com/hashtag/shorts", null, 3)

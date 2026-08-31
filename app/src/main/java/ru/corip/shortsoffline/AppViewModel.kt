@@ -33,6 +33,7 @@ data class UiState(
 
     val savedCount: Int = 0,
     val savedBytes: Long = 0,
+    val savedByPlatform: Map<String, Pair<Int, Long>> = emptyMap(),
     val freeSpace: Long = 0,
     val lifetime: Lifetime = Lifetime(0, 0, 0),
 
@@ -252,7 +253,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Candidate(
                 id = YtDlp.idFromUrl(link), title = "Видео", channel = "", duration = 0,
                 views = 0, likes = 0, commentCount = 0, thumbUrl = null,
-                url = link, fromShortsFeed = true,
+                url = link, platform = _state.value.platform.name, fromShortsFeed = true,
             ).also { it.size = YtDlp.estimateSize(30) }
         }
         _state.update {
@@ -314,6 +315,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(
             savedCount = store.count(),
             savedBytes = store.totalBytes(),
+            savedByPlatform = YtDlp.Platform.entries.associate { p ->
+                p.name to (store.count(p.name) to store.bytes(p.name))
+            },
             freeSpace = store.freeSpace(),
             lifetime = store.lifetime(),
         )
@@ -569,10 +573,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ плеер
 
-    fun openPlayer() {
+    /** [platform] = null означает всё скачанное, иначе только одна площадка. */
+    fun openPlayer(platform: YtDlp.Platform? = null) {
         _state.update {
             it.copy(
-                screen = Screen.PLAYER, queue = store.all(), index = 0,
+                screen = Screen.PLAYER,
+                queue = if (platform == null) store.all() else store.all(platform.name),
+                index = 0,
                 sessionDeleted = 0, sessionFreed = 0,
                 commentsOpen = false, comments = emptyList(),
             )
