@@ -186,7 +186,7 @@ class Store(context: Context) {
             likes = candidate.likes,
             commentCount = candidate.commentCount,
             savedComments = comments.size,
-            platform = video.platform,
+            platform = candidate.platform,
             file = videoFile.absolutePath,
             thumb = thumbFile?.absolutePath,
             meta = metaFile.absolutePath,
