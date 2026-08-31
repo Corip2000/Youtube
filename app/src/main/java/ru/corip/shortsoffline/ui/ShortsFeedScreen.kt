@@ -301,6 +301,8 @@ fun ShortsFeedScreen(
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.databaseEnabled = true
+                        settings.useWideViewPort = true
+                        settings.loadWithOverviewMode = true
                         settings.userAgentString = platform.userAgent
                         webViewClient = object : WebViewClient() {
                         override fun onReceivedError(

@@ -133,6 +133,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ одно видео
 
+    /** Ссылка пришла из другого приложения через «Поделиться». */
+    fun handleSharedLink(raw: String) {
+        val link = Regex("""https?://\S+""").find(raw)?.value ?: return
+        _state.update {
+            it.copy(
+                screen = Screen.LINK, linkUrl = link,
+                linkInfo = null, linkStatus = null, linkProgress = 0f,
+            )
+        }
+        checkLink()
+    }
+
     fun openLink() = _state.update {
         it.copy(screen = Screen.LINK, linkInfo = null, linkStatus = null, linkProgress = 0f)
     }

@@ -194,6 +194,13 @@ private fun VideoTab(
             "Файл попадает в галерею, без лайков и комментариев.",
         style = Type.Small,
     )
+    Spacer(Modifier.height(10.dp))
+    Text(
+        "Проще всего так: в самом приложении TikTok или YouTube нажми " +
+            "«Поделиться» и выбери ShortsOffline — ссылка прилетит сюда " +
+            "и разберётся сама.",
+        style = Type.Small.copy(color = Palette.Jade),
+    )
 
     Spacer(Modifier.height(16.dp))
     Text(

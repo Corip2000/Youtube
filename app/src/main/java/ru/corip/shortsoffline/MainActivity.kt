@@ -1,5 +1,6 @@
 package ru.corip.shortsoffline
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -18,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import ru.corip.shortsoffline.ui.DownloadScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
@@ -29,17 +31,44 @@ import ru.corip.shortsoffline.ui.ShortsFeedScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
 
 class MainActivity : ComponentActivity() {
+
+    /** Ссылка, пришедшая из другого приложения, до создания экрана. */
+    private val shared = MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { App() }
+        readShared(intent)
+        setContent { App(shared) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readShared(intent)
+    }
+
+    private fun readShared(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        intent.getStringExtra(Intent.EXTRA_TEXT)?.let { shared.value = it }
     }
 }
 
 @Composable
-private fun App(vm: AppViewModel = viewModel()) {
+private fun App(
+    shared: MutableStateFlow<String?> = MutableStateFlow(null),
+    vm: AppViewModel = viewModel(),
+) {
     val state by vm.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+
+    // Пришла ссылка извне — открываем экран загрузки и сразу её разбираем.
+    val incoming by shared.collectAsState()
+    LaunchedEffect(incoming) {
+        incoming?.let {
+            vm.handleSharedLink(it)
+            shared.value = null
+        }
+    }
 
     LaunchedEffect(state.toast) {
         state.toast?.let {
