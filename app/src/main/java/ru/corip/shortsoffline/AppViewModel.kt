@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, SHAREPOINT, PLAYER }
+enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, PLAYER }
 
 /** Вкладки главного экрана. */
 enum class Tab(val title: String) {
@@ -189,7 +189,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(copyLabels = v) }
     }
 
-    fun openSharePoint() = _state.update { it.copy(screen = Screen.SHAREPOINT) }
+    /** Показывает перекрестие поверх других приложений и уходит с экрана. */
+    fun pickSharePointOnScreen() {
+        ClickerService.shareX = _state.value.shareX
+        ClickerService.shareY = _state.value.shareY
+        ClickerService.showPicker()
+        _state.update {
+            it.copy(toast = "Перекрестие показано — открой TikTok и поставь его на стрелку")
+        }
+    }
+
+    /** Координаты мог поменять сам оверлей — перечитываем. */
+    fun refreshSharePoint() = _state.update {
+        it.copy(shareX = store.shareX, shareY = store.shareY)
+    }
 
     fun setSharePoint(x: Float, y: Float) {
         store.shareX = x
@@ -221,14 +234,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     clickerLinks = ClickerService.links.size,
                 )
             }
-            if (!ClickerService.running && ClickerService.links.isNotEmpty()) break
+            if (!ClickerService.running) break
             kotlinx.coroutines.delay(700)
         }
     }
 
     /** Собранное автокликером готово к загрузке. */
     fun useClickerLinks() {
-        _state.update { it.copy(collected = ClickerService.links.toList()) }
+        val links = ClickerService.links.toList()
+        if (links.isEmpty()) {
+            _state.update { it.copy(toast = "Пока ничего не собрано.") }
+            return
+        }
+        _state.update { it.copy(collected = links) }
         useCollected()
     }
 
@@ -376,8 +394,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (ids.isEmpty()) {
             _state.update {
                 it.copy(
-                    screen = Screen.DOWNLOAD, jobState = JobState.FAILED,
-                    jobMessage = "Всё, что нашлось в ленте, уже скачано.",
+                    screen = Screen.DOWNLOAD, jobState = JobState.DONE,
+                    jobMessage = "Всё собранное уже скачано раньше.",
                 )
             }
             return
@@ -613,7 +631,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val detail = YtDlp.lastError
                 val text = (e.message ?: "Что-то пошло не так.") +
                     if (detail != null && e.message?.contains(detail) != true) "\n\nyt-dlp сказал: $detail" else ""
-                _state.update { it.copy(jobState = JobState.FAILED, jobMessage = text) }
+                _state.update {
+                    // Если часть роликов уже нашлась — не выбрасываем их,
+                    // а предлагаем скачать то, что есть.
+                    if (it.found.isNotEmpty()) {
+                        it.copy(
+                            jobState = JobState.READY,
+                            jobMessage = "Дальше не пошло, но ${it.found.size} уже найдено.\n\n$text",
+                        )
+                    } else {
+                        it.copy(jobState = JobState.FAILED, jobMessage = text)
+                    }
+                }
             }
         }
     }

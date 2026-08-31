@@ -5,6 +5,7 @@ import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,9 +16,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,16 +36,19 @@ import ru.corip.shortsoffline.Screen
 import ru.corip.shortsoffline.UiState
 
 /**
- * Автокликер: приложение само нажимает «Поделиться» и «Копировать ссылку»
- * в чужой ленте, забирает адрес ролика и листает дальше.
+ * Автосбор чужой ленты.
  *
- * Способ грубоватый, но других нет: заглянуть внутрь чужого приложения
- * система не даёт, а повторить за тобой касания — разрешает, через службу
- * специальных возможностей.
+ * Читать другое приложение система не даёт, поэтому приложение повторяет
+ * за тобой касания: жмёт «Поделиться», копирует ссылку и листает дальше.
+ *
+ * Экран разбит надвое: «Как настроить» — то, что делается один раз,
+ * «Запуск» — то, чем пользуешься каждый раз.
  */
 @Composable
 fun ClickerScreen(state: UiState, vm: AppViewModel) {
     val context = LocalContext.current
+    var setupOpen by remember { mutableStateOf(false) }
+    var runOpen by remember { mutableStateOf(true) }
 
     Column(
         Modifier
@@ -59,99 +70,157 @@ fun ClickerScreen(state: UiState, vm: AppViewModel) {
 
         Spacer(Modifier.height(20.dp))
 
-        Panel {
-            Text("СОСТОЯНИЕ", style = Type.Label)
+        // ---------------------------------------------------- как настроить
+        Foldable("Как настроить", setupOpen) { setupOpen = !setupOpen }
+        if (setupOpen) {
+            Spacer(Modifier.height(12.dp))
+
+            AppButton("Включить службу", tail = "один раз, в настройках") {
+                context.startActivity(
+                    Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+            AppButton(
+                "Поставить перекрестие",
+                tail = "${(state.shareX * 100).toInt()}% и ${(state.shareY * 100).toInt()}%",
+            ) { vm.pickSharePointOnScreen() }
             Spacer(Modifier.height(8.dp))
             Text(
-                state.clickerStatus,
-                style = Type.Data.copy(
-                    color = if (state.clickerRunning) Palette.Jade else Palette.Ink
-                ),
+                "Перекрестие появится поверх всех приложений. Открой TikTok, " +
+                    "перетащи метку на стрелку «Поделиться» и нажми «Готово» — " +
+                    "координаты запомнятся.",
+                style = Type.Small,
             )
-            if (state.clickerLinks > 0) {
+
+            Spacer(Modifier.height(16.dp))
+            Panel {
+                Text("ПОДПИСИ КНОПОК", style = Type.Label)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Кнопки ищутся по надписи и по описанию — так переживается " +
+                        "смена разметки. Если названы иначе, впиши через запятую.",
+                    style = Type.Small,
+                )
+                Spacer(Modifier.height(12.dp))
+                LabelField(state.shareLabels, "Кнопка «Поделиться»") { vm.setShareLabels(it) }
+                Spacer(Modifier.height(10.dp))
+                LabelField(state.copyLabels, "Кнопка «Ссылка»") { vm.setCopyLabels(it) }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Step(1, "Включи службу в настройках телефона — «Специальные возможности», пункт ShortsOffline.")
+            Step(2, "Поставь перекрестие на стрелку «Поделиться» в TikTok.")
+            Step(3, "Открой «Запуск», задай количество и нажми «Начать сбор».")
+            Step(4, "За пять секунд переключись в TikTok и открой ленту.")
+            Step(5, "Дальше телефон работает сам. Звук выключается на время сбора.")
+
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Служба видит содержимое экранов всех приложений — это цена такой " +
+                    "автоматизации. Выключай её, когда не пользуешься.",
+                style = Type.Small.copy(color = Palette.Signal),
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        // ---------------------------------------------------------- запуск
+        Foldable("Запуск", runOpen) { runOpen = !runOpen }
+        if (runOpen) {
+            Spacer(Modifier.height(12.dp))
+
+            Panel {
+                Text("СКОЛЬКО РОЛИКОВ", style = Type.Label)
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        if (state.count == 0) "\u221E" else "${state.count}",
+                        style = Type.Display.copy(fontSize = 34.sp),
+                    )
+                    Text(
+                        if (state.count == 0) "  без предела" else "  штук",
+                        style = Type.Small,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
+                Slider(
+                    value = state.count.toFloat(),
+                    onValueChange = { vm.setCount(it.toInt()) },
+                    valueRange = 1f..200f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Palette.Signal,
+                        activeTrackColor = Palette.Signal,
+                        inactiveTrackColor = Palette.PanelHi,
+                    ),
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Panel {
+                Text("СОСТОЯНИЕ", style = Type.Label)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    state.clickerStatus,
+                    style = Type.Data.copy(
+                        color = if (state.clickerRunning) Palette.Jade else Palette.Ink
+                    ),
+                )
                 Spacer(Modifier.height(6.dp))
                 Text("Собрано ссылок: ${state.clickerLinks}", style = Type.Small)
             }
-        }
 
-        Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
-        AppButton("Включить службу", tail = "один раз, в настройках") {
-            context.startActivity(
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        }
+            if (state.clickerRunning) {
+                AppButton("Остановить", primary = true) { vm.stopClicker() }
+            } else {
+                AppButton("Начать сбор", tail = "${state.count} роликов", primary = true) {
+                    vm.startClicker()
+                }
+            }
 
-        Spacer(Modifier.height(10.dp))
-
-        if (state.clickerRunning) {
-            AppButton("Остановить", primary = true) { vm.stopClicker() }
-        } else {
-            AppButton("Начать сбор", tail = "${state.count} роликов", primary = true) {
-                vm.startClicker()
+            // Кнопка доступна всегда, когда что-то собрано: сбор мог оборваться
+            // на середине, и терять уже полученное незачем.
+            if (state.clickerLinks > 0) {
+                Spacer(Modifier.height(10.dp))
+                AppButton(
+                    "Скачать собранное",
+                    tail = "${state.clickerLinks} шт.",
+                ) { vm.useClickerLinks() }
+                if (state.clickerRunning) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Сбор ещё идёт — скачается то, что набралось на этот момент.",
+                        style = Type.Small,
+                    )
+                }
             }
         }
-
-        if (state.clickerLinks > 0 && !state.clickerRunning) {
-            Spacer(Modifier.height(10.dp))
-            AppButton("Скачать собранное", tail = "${state.clickerLinks} шт.") {
-                vm.useClickerLinks()
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Panel {
-            Text("ПОДПИСИ КНОПОК", style = Type.Label)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "Кнопки ищутся по надписи, а не по месту на экране — так " +
-                    "переживается смена разметки. Если в твоём приложении они " +
-                    "названы иначе, впиши через запятую.",
-                style = Type.Small,
-            )
-            Spacer(Modifier.height(12.dp))
-            LabelField(state.shareLabels, "Кнопка «Поделиться»") { vm.setShareLabels(it) }
-            Spacer(Modifier.height(10.dp))
-            LabelField(state.copyLabels, "Кнопка «Ссылка»") { vm.setCopyLabels(it) }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        Panel {
-            Text("МЕСТО КНОПКИ «ПОДЕЛИТЬСЯ»", style = Type.Label)
-            Spacer(Modifier.height(6.dp))
-            Text(
-                "В TikTok это стрелка без подписи — найти её по слову нельзя. " +
-                    "Если и по описанию не найдётся, приложение ткнёт по этому " +
-                    "месту.",
-                style = Type.Small,
-            )
-            Spacer(Modifier.height(12.dp))
-            AppButton(
-                "Указать на экране",
-                tail = "${(state.shareX * 100).toInt()}% и ${(state.shareY * 100).toInt()}%",
-            ) { vm.openSharePoint() }
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        Text("КАК ЭТО РАБОТАЕТ", style = Type.Label)
-        Spacer(Modifier.height(10.dp))
-        Step(1, "Включи службу в настройках телефона — раздел «Специальные возможности», пункт ShortsOffline.")
-        Step(2, "Вернись сюда, задай количество роликов на экране загрузки и нажми «Начать сбор».")
-        Step(3, "За пять секунд переключись в приложение с лентой и открой её.")
-        Step(4, "Дальше телефон работает сам: жмёт «Поделиться», копирует ссылку, листает. Звук выключается.")
-        Step(5, "Когда наберётся нужное — возвращайся и жми «Скачать собранное».")
-
-        Spacer(Modifier.height(20.dp))
-        Text(
-            "Служба видит содержимое экранов всех приложений — это цена такой " +
-                "автоматизации. Выключай её в настройках, когда не пользуешься.",
-            style = Type.Small.copy(color = Palette.Signal),
-        )
     }
+}
+
+/** Заголовок сворачиваемой части. */
+@Composable
+private fun Foldable(title: String, open: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onToggle)
+            .padding(vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, style = Type.Data.copy(fontWeight = FontWeight.SemiBold))
+        Text(if (open) "\u2013" else "+", style = Type.Data.copy(color = Palette.Signal))
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(Palette.Edge)
+    )
 }
 
 @Composable

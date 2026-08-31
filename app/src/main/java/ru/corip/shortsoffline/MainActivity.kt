@@ -28,7 +28,6 @@ import ru.corip.shortsoffline.ui.LinkScreen
 import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.SoloPlayerScreen
 import ru.corip.shortsoffline.ui.PlayerScreen
-import ru.corip.shortsoffline.ui.SharePointScreen
 import ru.corip.shortsoffline.ui.ShortsFeedScreen
 import ru.corip.shortsoffline.ui.ReceiptDialog
 
@@ -110,12 +109,6 @@ private fun App(
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
             Screen.LINK -> LinkScreen(state, vm)
             Screen.CLICKER -> ClickerScreen(state, vm)
-            Screen.SHAREPOINT -> SharePointScreen(
-                x = state.shareX,
-                y = state.shareY,
-                onPick = { px, py -> vm.setSharePoint(px, py) },
-                onDone = { vm.openClicker() },
-            )
             Screen.SOLO -> state.localUri?.let {
                 SoloPlayerScreen(it, onClose = { vm.closeLocal() })
             }

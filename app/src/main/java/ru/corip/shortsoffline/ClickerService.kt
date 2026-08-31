@@ -5,7 +5,17 @@ import android.accessibilityservice.GestureDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Path
+import android.content.Context.MODE_PRIVATE
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.FrameLayout
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -57,10 +67,16 @@ class ClickerService : AccessibilityService() {
         fun stop() {
             instance?.endRun("Остановлено вручную")
         }
+
+        /** Показать перекрестие поверх других приложений. */
+        fun showPicker() = instance?.addPicker()
+
+        fun hidePicker() = instance?.removePicker()
     }
 
     private var worker: Thread? = null
     private var savedVolume = -1
+    private var picker: View? = null
 
     override fun onServiceConnected() {
         instance = this
@@ -68,6 +84,7 @@ class ClickerService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        removePicker()
         instance = null
         running = false
         super.onDestroy()
@@ -75,6 +92,101 @@ class ClickerService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
     override fun onInterrupt() = Unit
+
+    // ------------------------------------------------------ выбор места кнопки
+
+    /**
+     * Перекрестие поверх чужих приложений. Разрешение «поверх других окон»
+     * не нужно: служба специальных возможностей рисует своим типом окна.
+     * Ты открываешь TikTok, тащишь метку на стрелку и жмёшь «Готово».
+     */
+    fun addPicker() {
+        if (picker != null) return
+        val windows = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val metrics = resources.displayMetrics
+        val dp = metrics.density
+        val markSize = (56 * dp).toInt()
+
+        val mark = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.argb(120, 255, 61, 132))
+                setStroke((3 * dp).toInt(), Color.rgb(255, 61, 132))
+            }
+        }
+        val done = Button(this).apply {
+            text = "Готово"
+            setBackgroundColor(Color.rgb(255, 61, 132))
+            setTextColor(Color.BLACK)
+        }
+
+        val container = FrameLayout(this).apply {
+            addView(mark, FrameLayout.LayoutParams(markSize, markSize))
+            addView(
+                done,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = markSize + (8 * dp).toInt() },
+            )
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (metrics.widthPixels * shareX).toInt() - markSize / 2
+            y = (metrics.heightPixels * shareY).toInt() - markSize / 2
+        }
+
+        // Метку таскаем пальцем, остальной экран остаётся рабочим.
+        var startX = 0f
+        var startY = 0f
+        var originX = 0
+        var originY = 0
+        mark.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX; startY = event.rawY
+                    originX = params.x; originY = params.y
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    params.x = originX + (event.rawX - startX).toInt()
+                    params.y = originY + (event.rawY - startY).toInt()
+                    windows.updateViewLayout(container, params)
+                }
+            }
+            true
+        }
+
+        done.setOnClickListener {
+            val cx = (params.x + markSize / 2f) / metrics.widthPixels
+            val cy = (params.y + markSize / 2f) / metrics.heightPixels
+            shareX = cx.coerceIn(0f, 1f)
+            shareY = cy.coerceIn(0f, 1f)
+            getSharedPreferences("shorts", MODE_PRIVATE).edit()
+                .putFloat("share_x", shareX)
+                .putFloat("share_y", shareY)
+                .apply()
+            status = "Место кнопки сохранено"
+            removePicker()
+        }
+
+        windows.addView(container, params)
+        picker = container
+    }
+
+    fun removePicker() {
+        val view = picker ?: return
+        runCatching {
+            (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view)
+        }
+        picker = null
+    }
 
     // ------------------------------------------------------------ прогон
 
@@ -96,8 +208,10 @@ class ClickerService : AccessibilityService() {
         status = "Открой ленту — начну через 5 секунд"
         sleep(5000)
 
+        // Терпимость к промахам: панель может открыться с задержкой, ролик —
+        // подгружаться. Раньше шесть подряд обрывали сбор на середине.
         var idle = 0
-        while (running && links.size < target && idle < 6) {
+        while (running && links.size < target && idle < 15) {
             val before = links.size
             status = "Собрано ${links.size} из $target"
 
@@ -117,6 +231,8 @@ class ClickerService : AccessibilityService() {
             }
             sleep(1400)
 
+            // Один и тот же адрес означает, что копирование не сработало,
+            // но это не повод останавливаться.
             readClipboard()?.let { links.add(it) }
             // Панель могла остаться открытой — закрываем, иначе свайп уйдёт в неё.
             performGlobalAction(GLOBAL_ACTION_BACK)
@@ -130,7 +246,7 @@ class ClickerService : AccessibilityService() {
         endRun(
             when {
                 links.size >= target -> "Готово"
-                idle >= 6 -> "Кнопки не найдены — проверь подписи"
+                idle >= 15 -> "Кнопки не находятся — проверь подписи и перекрестие"
                 else -> "Завершено"
             }
         )
