@@ -170,6 +170,16 @@ fun ClickerScreen(state: UiState, vm: AppViewModel) {
                 )
                 Spacer(Modifier.height(6.dp))
                 Text("Собрано ссылок: ${state.clickerLinks}", style = Type.Small)
+                if (state.clipboardStuck) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Буфер обмена не читается. Android с десятой версии " +
+                            "отдаёт его только приложению на переднем плане — " +
+                            "похоже, мы упёрлись в это. Скажи, переделаю сбор " +
+                            "на прямую передачу ссылки вместо копирования.",
+                        style = Type.Small.copy(color = Palette.Signal),
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))

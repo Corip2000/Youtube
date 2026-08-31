@@ -71,6 +71,7 @@ data class UiState(
     val clickerStatus: String = "Не запущен",
     val clickerRunning: Boolean = false,
     val clickerLinks: Int = 0,
+    val clipboardStuck: Boolean = false,
     val shareX: Float = 0.93f,
     val shareY: Float = 0.62f,
     val savedByPlatform: Map<String, Pair<Int, Long>> = emptyMap(),
@@ -232,6 +233,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     clickerStatus = ClickerService.status,
                     clickerRunning = ClickerService.running,
                     clickerLinks = ClickerService.links.size,
+                    clipboardStuck = ClickerService.copyFailures >= 3,
                 )
             }
             if (!ClickerService.running) break

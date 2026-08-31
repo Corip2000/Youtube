@@ -10,12 +10,17 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
+import android.widget.TextView
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
@@ -41,6 +46,10 @@ class ClickerService : AccessibilityService() {
             private set
 
         @Volatile var status: String = "Не запущен"
+            private set
+
+        /** Сколько раз подряд буфер не отдал новую ссылку. */
+        @Volatile var copyFailures = 0
             private set
 
         @Volatile var target: Int = 20
@@ -77,6 +86,9 @@ class ClickerService : AccessibilityService() {
     private var worker: Thread? = null
     private var savedVolume = -1
     private var picker: View? = null
+    private var counter: View? = null
+    private var counterText: TextView? = null
+    private val ui = Handler(Looper.getMainLooper())
 
     override fun onServiceConnected() {
         instance = this
@@ -85,6 +97,7 @@ class ClickerService : AccessibilityService() {
 
     override fun onDestroy() {
         removePicker()
+        removeCounter()
         instance = null
         running = false
         super.onDestroy()
@@ -188,12 +201,86 @@ class ClickerService : AccessibilityService() {
         picker = null
     }
 
+    // ------------------------------------------------------ счётчик на экране
+
+    /**
+     * Счётчик поверх других приложений: видно, сколько собрано и сколько
+     * осталось, не переключаясь обратно. Тут же кнопка остановки.
+     */
+    private fun addCounter() {
+        if (counter != null) return
+        val windows = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val dp = resources.displayMetrics.density
+
+        val label = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            setPadding((14 * dp).toInt(), (8 * dp).toInt(), (14 * dp).toInt(), (8 * dp).toInt())
+            background = GradientDrawable().apply {
+                cornerRadius = 10 * dp
+                setColor(Color.argb(220, 22, 20, 27))
+                setStroke((1 * dp).toInt(), Color.rgb(255, 61, 132))
+            }
+            text = "Собрано 0"
+        }
+        val stop = Button(this).apply {
+            text = "Стоп"
+            setBackgroundColor(Color.rgb(255, 61, 132))
+            setTextColor(Color.BLACK)
+            setOnClickListener { endRun("Остановлено") }
+        }
+
+        val row = FrameLayout(this).apply {
+            addView(label)
+            addView(
+                stop,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = (44 * dp).toInt() },
+            )
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (12 * dp).toInt()
+            y = (60 * dp).toInt()
+        }
+
+        windows.addView(row, params)
+        counter = row
+        counterText = label
+    }
+
+    private fun updateCounter(text: String) {
+        ui.post { counterText?.text = text }
+    }
+
+    private fun removeCounter() {
+        val view = counter ?: return
+        ui.post {
+            runCatching {
+                (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(view)
+            }
+        }
+        counter = null
+        counterText = null
+    }
+
     // ------------------------------------------------------------ прогон
 
     fun beginRun() {
         if (running) return
         running = true
+        copyFailures = 0
         mute(true)
+        ui.post { addCounter() }
         worker = Thread { loop() }.also { it.start() }
     }
 
@@ -201,19 +288,29 @@ class ClickerService : AccessibilityService() {
         running = false
         mute(false)
         status = "$reason · собрано ${links.size}"
+        // Итог держим на экране подольше: ты в это время в TikTok и должен
+        // успеть увидеть, чем всё кончилось.
+        updateCounter("$reason\nСобрано ${links.size} — вернись в приложение")
+        ui.postDelayed({ removeCounter() }, 12000)
     }
 
     private fun loop() {
         // Даём время переключиться в приложение с лентой.
         status = "Открой ленту — начну через 5 секунд"
+        updateCounter("Старт через 5 секунд")
         sleep(5000)
 
         // Терпимость к промахам: панель может открыться с задержкой, ролик —
         // подгружаться. Раньше шесть подряд обрывали сбор на середине.
         var idle = 0
-        while (running && links.size < target && idle < 15) {
+        while (running && (target <= 0 || links.size < target) && idle < 15) {
             val before = links.size
             status = "Собрано ${links.size} из $target"
+            updateCounter(
+                (if (target > 0) "Собрано ${links.size} из $target"
+                else "Собрано ${links.size}") +
+                    if (copyFailures >= 3) "\nБуфер не читается" else ""
+            )
 
             // Сначала пробуем найти кнопку осмысленно, и только потом — вслепую
             // по месту: у TikTok «Поделиться» это стрелка без подписи.
@@ -233,11 +330,15 @@ class ClickerService : AccessibilityService() {
 
             // Один и тот же адрес означает, что копирование не сработало,
             // но это не повод останавливаться.
-            readClipboard()?.let { links.add(it) }
+            val link = readClipboard()
+            if (link == null || !links.add(link)) copyFailures++ else copyFailures = 0
             // Панель могла остаться открытой — закрываем, иначе свайп уйдёт в неё.
             performGlobalAction(GLOBAL_ACTION_BACK)
             sleep(500)
             if (links.size == before) idle++ else idle = 0
+
+            // Цель достигнута — дальше листать незачем.
+            if (links.size >= target) break
 
             swipeUp()
             sleep(1800)
@@ -245,7 +346,8 @@ class ClickerService : AccessibilityService() {
 
         endRun(
             when {
-                links.size >= target -> "Готово"
+                target > 0 && links.size >= target -> "Готово"
+                copyFailures >= 8 -> "Буфер обмена недоступен — ссылки не читаются"
                 idle >= 15 -> "Кнопки не находятся — проверь подписи и перекрестие"
                 else -> "Завершено"
             }
