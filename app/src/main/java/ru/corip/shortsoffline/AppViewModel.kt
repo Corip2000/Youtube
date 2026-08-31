@@ -17,13 +17,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, PLAYER }
+enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, PLAYER }
 
 /** Вкладки главного экрана. */
 enum class Tab(val title: String) {
     VIDEO("Видео"),
-    YOUTUBE("YouTube"),
-    TIKTOK("TikTok"),
+    SHORTS("Шортсы"),
 }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
@@ -33,7 +32,6 @@ data class UiState(
 
     val savedCount: Int = 0,
     val savedBytes: Long = 0,
-    val savedByPlatform: Map<String, Pair<Int, Long>> = emptyMap(),
     val freeSpace: Long = 0,
     val lifetime: Lifetime = Lifetime(0, 0, 0),
 
@@ -42,7 +40,6 @@ data class UiState(
     val showReceipt: Boolean = false,
 
     val tab: Tab = Tab.VIDEO,
-    val platform: YtDlp.Platform = YtDlp.Platform.YOUTUBE,
     val desktopView: Boolean = false,
     val feed: YtDlp.Feed = YtDlp.Feed.RECOMMENDED,
     val count: Int = 10,
@@ -66,6 +63,13 @@ data class UiState(
     val commentsOpen: Boolean = false,
 
     val customUrl: String = "",
+    val accounts: List<String> = emptyList(),
+    // автокликер
+    val shareLabels: String = "",
+    val copyLabels: String = "",
+    val clickerStatus: String = "Не запущен",
+    val clickerRunning: Boolean = false,
+    val clickerLinks: Int = 0,
     val commentDepth: Int = 30,
     val fastSize: Boolean = true,
     val running: Int = 0,
@@ -97,16 +101,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
-        val startPlatform = runCatching { YtDlp.Platform.valueOf(store.platform) }
-            .getOrDefault(YtDlp.Platform.YOUTUBE)
         _state.update {
             it.copy(
                 feed = saved,
                 customUrl = store.customTarget,
-                platform = startPlatform,
-                desktopView = store.desktopView(
-                    startPlatform.name, startPlatform.desktopByDefault
-                ),
+                accounts = store.accounts,
+                shareLabels = store.shareLabels,
+                copyLabels = store.copyLabels,
+                desktopView = store.desktopView,
                 commentDepth = store.commentDepth,
                 fastSize = store.fastSize,
             )
@@ -130,20 +132,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setTab(value: Tab) = _state.update { it.copy(tab = value) }
 
-    fun setPlatform(value: YtDlp.Platform) {
-        store.platform = value.name
-        _state.update {
-            it.copy(
-                platform = value,
-                desktopView = store.desktopView(value.name, value.desktopByDefault),
-            )
-        }
+    fun addAccount(name: String) {
+        val clean = name.trim().removePrefix("@")
+        if (clean.isBlank()) return
+        val list = (store.accounts + clean).distinct()
+        store.accounts = list
+        _state.update { it.copy(accounts = list) }
     }
+
+    fun removeAccount(name: String) {
+        val list = store.accounts - name
+        store.accounts = list
+        _state.update { it.copy(accounts = list) }
+    }
+
 
     /** Переключение вида сайта запоминается для этой площадки. */
     fun setDesktopView(value: Boolean) {
-        val platform = _state.value.platform
-        store.setDesktopView(platform.name, value)
+        store.desktopView = value
         _state.update { it.copy(desktopView = value) }
     }
 
@@ -161,6 +167,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         checkLink()
+    }
+
+    // ------------------------------------------------------------ автокликер
+
+    fun openClicker() = _state.update { it.copy(screen = Screen.CLICKER) }
+
+    fun setShareLabels(v: String) {
+        store.shareLabels = v
+        _state.update { it.copy(shareLabels = v) }
+    }
+
+    fun setCopyLabels(v: String) {
+        store.copyLabels = v
+        _state.update { it.copy(copyLabels = v) }
+    }
+
+    /** Запуск сбора. Дальше нужно переключиться в приложение с лентой. */
+    fun startClicker() {
+        ClickerService.shareLabels = _state.value.shareLabels.split(",").map { it.trim() }
+            .filter { it.isNotEmpty() }
+        ClickerService.copyLabels = _state.value.copyLabels.split(",").map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val count = _state.value.count.takeIf { it > 0 } ?: 50
+        ClickerService.start(count)
+        watchClicker()
+    }
+
+    fun stopClicker() = ClickerService.stop()
+
+    private fun watchClicker() = viewModelScope.launch {
+        while (true) {
+            _state.update {
+                it.copy(
+                    clickerStatus = ClickerService.status,
+                    clickerRunning = ClickerService.running,
+                    clickerLinks = ClickerService.links.size,
+                )
+            }
+            if (!ClickerService.running && ClickerService.links.isNotEmpty()) break
+            kotlinx.coroutines.delay(700)
+        }
+    }
+
+    /** Собранное автокликером готово к загрузке. */
+    fun useClickerLinks() {
+        _state.update { it.copy(collected = ClickerService.links.toList()) }
+        useCollected()
     }
 
     fun openLink() = _state.update {
@@ -187,6 +240,66 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             }
+    }
+
+    /**
+     * Сохранить в приложение: ролик попадёт в плеер своей вкладки,
+     * вместе с комментариями. Именно этим путём удобно работать из мода
+     * или официального приложения через «Поделиться».
+     */
+    fun saveLinkToLibrary() = viewModelScope.launch {
+        val url = _state.value.linkUrl.trim()
+        val info = _state.value.linkInfo ?: return@launch
+        _state.update { it.copy(linkBusy = true, linkStatus = "Качаю в приложение…", linkProgress = 0f) }
+        runCatching {
+            val candidate = Candidate(
+                id = info.id.ifBlank { YtDlp.idFromUrl(url) },
+                title = info.title,
+                channel = info.channel,
+                duration = info.duration,
+                views = 0, likes = 0, commentCount = 0,
+                thumbUrl = null,
+                url = url,
+                fromShortsFeed = true,
+            ).also { it.size = info.size }
+
+            val depth = _state.value.commentDepth
+            val result = YtDlp.download(
+                candidate.id, url, store.videosDir,
+                maxTop = depth,
+                maxReplies = if (depth >= 100) 10 else 5,
+                requireVertical = false,
+            ) { p -> _state.update { it.copy(linkProgress = p) } }
+
+            val thumb = YtDlp.thumbnail(
+                result.thumbUrl, File(store.videosDir, "${candidate.id}.jpg")
+            )
+            store.save(
+                candidate.copy(
+                    title = result.title.ifBlank { candidate.title },
+                    channel = result.channel.ifBlank { candidate.channel },
+                    duration = if (result.duration > 0) result.duration else candidate.duration,
+                    likes = result.likes, views = result.views,
+                    commentCount = result.commentCount,
+                ),
+                result.file, thumb, result.comments,
+            )
+        }.onSuccess {
+            refreshStorage()
+            _state.update {
+                it.copy(
+                    linkBusy = false, linkProgress = 1f,
+                    linkStatus = "Готово — ищи во вкладке «Шортсы»",
+                )
+            }
+        }.onFailure { e ->
+            _state.update {
+                it.copy(
+                    linkBusy = false,
+                    linkStatus = YtDlp.lastError ?: e.message ?: "Скачать не вышло.",
+                )
+            }
+        }
     }
 
     /** Качаем и сразу кладём в галерею — без лайков и комментариев. */
@@ -227,7 +340,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(screen = Screen.FEED, collected = emptyList())
     }
 
-    /** Из ленты приходят полные ссылки: у YouTube и TikTok они разного вида. */
+    /** Из ленты приходят полные ссылки на ролики. */
     fun collectShort(link: String) = _state.update {
         if (link in it.collected) it else it.copy(collected = it.collected + link)
     }
@@ -253,7 +366,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Candidate(
                 id = YtDlp.idFromUrl(link), title = "Видео", channel = "", duration = 0,
                 views = 0, likes = 0, commentCount = 0, thumbUrl = null,
-                url = link, platform = _state.value.platform.name, fromShortsFeed = true,
+                url = link, fromShortsFeed = true,
             ).also { it.size = YtDlp.estimateSize(30) }
         }
         _state.update {
@@ -315,9 +428,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(
             savedCount = store.count(),
             savedBytes = store.totalBytes(),
-            savedByPlatform = YtDlp.Platform.entries.associate { p ->
-                p.name to (store.count(p.name) to store.bytes(p.name))
-            },
             freeSpace = store.freeSpace(),
             lifetime = store.lifetime(),
         )
@@ -353,7 +463,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         jobHandle = viewModelScope.launch {
             runCatching {
                 val wanted = _state.value.count
-                val pool = YtDlp.feed(feed, wanted, null, store.ids(), _state.value.customUrl)
+                val source = if (feed == YtDlp.Feed.ACCOUNTS)
+                    store.accounts.joinToString("\n")
+                else _state.value.customUrl
+                val pool = YtDlp.feed(feed, wanted, null, store.ids(), source)
                 if (pool.isEmpty()) {
                     error(
                         if (feed.needsLogin)
@@ -510,7 +623,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     maxTop = depth,
                                     maxReplies = if (depth >= 100) 10 else 5,
                                     requireVertical = !candidate.fromShortsFeed,
-                                    maxSeconds = _state.value.platform.maxSeconds,
                                 ) { }
                                 val thumb = YtDlp.thumbnail(
                                     candidate.thumbUrl ?: result.thumbUrl,
@@ -573,12 +685,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ плеер
 
-    /** [platform] = null означает всё скачанное, иначе только одна площадка. */
-    fun openPlayer(platform: YtDlp.Platform? = null) {
+    /** Открывает плеер со всем скачанным. */
+    fun openPlayer() {
         _state.update {
             it.copy(
                 screen = Screen.PLAYER,
-                queue = if (platform == null) store.all() else store.all(platform.name),
+                queue = store.all(),
                 index = 0,
                 sessionDeleted = 0, sessionFreed = 0,
                 commentsOpen = false, comments = emptyList(),

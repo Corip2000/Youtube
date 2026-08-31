@@ -49,7 +49,6 @@ import ru.corip.shortsoffline.YtDlp
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LoginScreen(
-    platform: YtDlp.Platform,
     desktop: Boolean,
     onDesktopChange: (Boolean) -> Unit,
     onDone: () -> Unit,
@@ -57,8 +56,17 @@ fun LoginScreen(
     var root by remember { mutableStateOf<FrameLayout?>(null) }
     var main by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
+    var hasSession by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) { onDispose { root?.removeAllViews(); main?.destroy() } }
+    // Без сброса на диск куки живут только в памяти окна. Окно уничтожается —
+    // сессия пропадает, и площадка снова просит войти. Отсюда был круг.
+    DisposableEffect(Unit) {
+        onDispose {
+            CookieManager.getInstance().flush()
+            root?.removeAllViews()
+            main?.destroy()
+        }
+    }
 
     Column(
         Modifier
@@ -74,17 +82,25 @@ fun LoginScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.padding(end = 12.dp)) {
-                Text("Вход в ${platform.title}", style = Type.Data)
+                Text("Вход в YouTube", style = Type.Data)
                 Text(
-                    if (progress in 1..99) "Загрузка $progress%"
-                    else "Войди в аккаунт, потом жми «Готово»",
-                    style = Type.Label,
+                    when {
+                        hasSession -> "Сессия поймана — можно жать «Готово»"
+                        progress in 1..99 -> "Загрузка $progress%"
+                        else -> "Войди в аккаунт, потом жми «Готово»"
+                    },
+                    style = Type.Label.copy(
+                        color = if (hasSession) Palette.Jade else Palette.Muted
+                    ),
                 )
             }
             Text(
                 "Готово \u2713",
                 style = Type.Data.copy(color = Palette.Signal),
-                modifier = Modifier.clickable { onDone() },
+                modifier = Modifier.clickable {
+                    CookieManager.getInstance().flush()
+                    onDone()
+                },
             )
         }
 
@@ -98,7 +114,7 @@ fun LoginScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             AppButton("Перезагрузить", Modifier.weight(1f)) {
-                main?.loadUrl(platform.loginUrl)
+                main?.loadUrl(YtDlp.Yt.LOGIN_URL)
             }
             AppButton(
                 if (desktop) "Вид: компьютер" else "Вид: телефон",
@@ -106,8 +122,8 @@ fun LoginScreen(
             ) {
                 val next = !desktop
                 onDesktopChange(next)
-                main?.settings?.userAgentString = platform.userAgent(next)
-                main?.loadUrl(platform.loginUrl)
+                main?.settings?.userAgentString = YtDlp.Yt.userAgent(next)
+                main?.loadUrl(YtDlp.Yt.LOGIN_URL)
             }
         }
 
@@ -132,7 +148,7 @@ fun LoginScreen(
                     settings.loadWithOverviewMode = true
                     settings.setSupportMultipleWindows(true)
                     settings.javaScriptCanOpenWindowsAutomatically = true
-                    settings.userAgentString = platform.userAgent(desktop)
+                    settings.userAgentString = YtDlp.Yt.userAgent(desktop)
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -144,6 +160,14 @@ fun LoginScreen(
                     override fun shouldOverrideUrlLoading(
                         view: WebView?, request: WebResourceRequest?,
                     ): Boolean = false
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        // Каждый шаг входа может выдать новую куку — сохраняем сразу,
+                        // чтобы ничего не потерялось при закрытии окна.
+                        CookieManager.getInstance().flush()
+                        hasSession = hasSessionCookie()
+                        super.onPageFinished(view, url)
+                    }
                 }
                 web.webChromeClient = object : WebChromeClient() {
                     override fun onProgressChanged(view: WebView?, newProgress: Int) {
@@ -158,7 +182,12 @@ fun LoginScreen(
                         resultMsg: Message,
                     ): Boolean {
                         val popup = newWeb()
-                        popup.webViewClient = WebViewClient()
+                        popup.webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                CookieManager.getInstance().flush()
+                                super.onPageFinished(view, url)
+                            }
+                        }
                         popup.webChromeClient = object : WebChromeClient() {
                             override fun onCloseWindow(window: WebView?) {
                                 container.removeView(window)
@@ -172,7 +201,7 @@ fun LoginScreen(
                         return true
                     }
                 }
-                web.loadUrl(platform.loginUrl)
+                web.loadUrl(YtDlp.Yt.LOGIN_URL)
 
                 container.addView(web)
                 root = container
@@ -182,4 +211,11 @@ fun LoginScreen(
             modifier = Modifier.fillMaxSize(),
         )
     }
+}
+
+/** Есть ли в браузере кука входа Google. */
+private fun hasSessionCookie(): Boolean {
+    val jar = CookieManager.getInstance().getCookie("https://www.youtube.com").orEmpty()
+    val keys = listOf("SID", "__Secure-1PSID", "LOGIN_INFO")
+    return keys.any { key -> Regex("(^|[;\\s])$key=[^;\\s]+").containsMatchIn(jar) }
 }

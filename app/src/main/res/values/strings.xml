@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ShortsOffline</string>
+    <string name="clicker_description">Нажимает «Поделиться» и «Копировать ссылку» за тебя, чтобы собрать ссылки на ролики из ленты. Работает только когда ты сам запустил сбор в приложении.</string>
 </resources>

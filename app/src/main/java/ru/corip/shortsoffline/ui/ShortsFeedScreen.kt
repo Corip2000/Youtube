@@ -76,32 +76,7 @@ private const val JS_EXTRACT_YT = """
 })()
 """
 
-private const val JS_EXTRACT_TT = """
-(function(){
-  var found = [], seen = {};
-  var html = document.documentElement.innerHTML;
-  // Основной вид ссылки — с именем автора. Если разметка другая, ловим
-  // просто номер ролика: у TikTok он работает и с любым автором в адресе.
-  var withAuthor = /\/@([A-Za-z0-9_.\-]{1,30})\/video\/(\d{15,21})/g;
-  var m;
-  while ((m = withAuthor.exec(html)) !== null) {
-    if (!seen[m[2]]) {
-      seen[m[2]] = 1;
-      found.push("https://www.tiktok.com/@" + m[1] + "/video/" + m[2]);
-    }
-  }
-  var bare = /"(?:id|itemId|awemeId)":"(\d{18,21})"/g;
-  while ((m = bare.exec(html)) !== null) {
-    if (!seen[m[1]]) {
-      seen[m[1]] = 1;
-      found.push("https://www.tiktok.com/@i/video/" + m[1]);
-    }
-  }
-  return found.join(" ");
-})()
-"""
-
-/** На настольной версии TikTok лента листается стрелкой вниз. */
+/** На настольной вёрстке лента листается стрелкой вниз. */
 private const val JS_ARROW_DOWN = """
 (function(){
   var e = new KeyboardEvent('keydown', {key:'ArrowDown', keyCode:40, which:40, bubbles:true});
@@ -116,16 +91,6 @@ private const val JS_LOGGED_IN = """
   var h = document.documentElement.innerHTML;
   if (h.indexOf('"loggedIn":true') >= 0) return 'yes';
   if (h.indexOf('"loggedIn":false') >= 0) return 'no';
-  return 'unknown';
-})()
-"""
-
-/** У TikTok признак входа называется иначе. */
-private const val JS_LOGGED_IN_TT = """
-(function(){
-  var h = document.documentElement.innerHTML;
-  if (h.indexOf('"isLogin":true') >= 0) return 'yes';
-  if (h.indexOf('"isLogin":false') >= 0) return 'no';
   return 'unknown';
 })()
 """
@@ -161,7 +126,6 @@ private fun WebView.swipeUp() {
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun ShortsFeedScreen(
-    platform: YtDlp.Platform,
     desktop: Boolean,
     collected: List<String>,
     target: Int,
@@ -178,7 +142,12 @@ fun ShortsFeedScreen(
     // Лента работает скрыто: смотреть ролики заранее не нужно.
     val showBrowser = false
 
-    DisposableEffect(Unit) { onDispose { web?.destroy() } }
+    DisposableEffect(Unit) {
+        onDispose {
+            CookieManager.getInstance().flush()
+            web?.destroy()
+        }
+    }
 
     LaunchedEffect(web) {
         val view = web ?: return@LaunchedEffect
@@ -186,9 +155,7 @@ fun ShortsFeedScreen(
         delay(3000)
         // Вход показываем справочно и сбор им не перекрываем: определитель
         // может ошибиться, а лента при этом работать.
-        val loginCheck =
-            if (platform == YtDlp.Platform.TIKTOK) JS_LOGGED_IN_TT else JS_LOGGED_IN
-        view.evaluateJavascript(loginCheck) { r ->
+        view.evaluateJavascript(JS_LOGGED_IN) { r ->
             when (r.trim('"')) {
                 "yes" -> loggedIn = true
                 "no" -> loggedIn = false
@@ -206,9 +173,7 @@ fun ShortsFeedScreen(
             status = if (target > 0) "Собираю ленту: ${mine.size} из $target"
                 else "Собираю ленту: ${mine.size}, жми «Хватит» когда достаточно"
 
-            val extractor =
-                if (platform == YtDlp.Platform.TIKTOK) JS_EXTRACT_TT else JS_EXTRACT_YT
-            view.evaluateJavascript(extractor) { raw ->
+            view.evaluateJavascript(JS_EXTRACT_YT) { raw ->
                 raw.trim('"').replace("\\\"", "").split(" ")
                     .map { it.trim() }
                     .filter { it.startsWith("http") }
@@ -249,7 +214,7 @@ fun ShortsFeedScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.padding(end = 12.dp)) {
-                Text("Моя лента · ${platform.title}", style = Type.Data)
+                Text("Мои рекомендации", style = Type.Data)
                 Text(
                     status,
                     style = Type.Label.copy(
@@ -311,7 +276,7 @@ fun ShortsFeedScreen(
                         settings.blockNetworkImage = true
                         settings.loadsImagesAutomatically = false
                         settings.mediaPlaybackRequiresUserGesture = true
-                        settings.userAgentString = platform.userAgent(desktop)
+                        settings.userAgentString = YtDlp.Yt.userAgent(desktop)
                         webViewClient = object : WebViewClient() {
                         override fun onReceivedError(
                             view: WebView?,
@@ -326,7 +291,7 @@ fun ShortsFeedScreen(
                         }
                     }
                         webChromeClient = WebChromeClient()
-                        loadUrl(platform.feedUrl)
+                        loadUrl(YtDlp.Yt.FEED_URL)
                         web = this
                     }
                 },
@@ -356,7 +321,7 @@ fun ShortsFeedScreen(
                     Spacer(Modifier.height(20.dp))
                     Text(
                         loadError ?: if (loggedIn == false)
-                            "${platform.title} не узнаёт тебя. Вернись и войди в аккаунт."
+                            "YouTube не узнаёт тебя. Вернись и войди в аккаунт."
                         else "Листаю твою ленту и запоминаю ролики. Смотреть их сейчас не нужно.",
                         style = Type.Small.copy(
                             color = if (loggedIn == false || loadError != null) Palette.Signal

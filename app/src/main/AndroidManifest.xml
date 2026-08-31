@@ -39,5 +39,23 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!--
+          Автокликер. Повторяет за тобой касания в другом приложении:
+          иначе собрать ссылки из чужой ленты нельзя, система не даёт
+          одному приложению читать другое.
+        -->
+        <service
+            android:name=".ClickerService"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/clicker_config" />
+        </service>
     </application>
 </manifest>

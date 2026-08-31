@@ -90,8 +90,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
 
         when (state.tab) {
             Tab.VIDEO -> VideoTab(state, vm, picker) { confirmClear = true }
-            Tab.YOUTUBE -> PlatformTab(state, vm, YtDlp.Platform.YOUTUBE)
-            Tab.TIKTOK -> PlatformTab(state, vm, YtDlp.Platform.TIKTOK)
+            Tab.SHORTS -> ShortsTab(state, vm)
         }
     }
 
@@ -183,15 +182,14 @@ private fun VideoTab(
 
     Spacer(Modifier.height(16.dp))
     Text(
-        "По ссылке качаются YouTube, TikTok, Rutube и VK Видео. " +
-            "Файл попадает в галерею, без лайков и комментариев.",
+        "По ссылке качается почти любое видео: YouTube, VK, Rutube и другие. " +
+            "Можно положить в галерею или в приложение, с комментариями.",
         style = Type.Small,
     )
     Spacer(Modifier.height(10.dp))
     Text(
-        "Проще всего так: в самом приложении TikTok или YouTube нажми " +
-            "«Поделиться» и выбери ShortsOffline — ссылка прилетит сюда " +
-            "и разберётся сама.",
+        "Проще всего так: в любом приложении нажми «Поделиться» и выбери " +
+            "ShortsOffline — ссылка прилетит сюда и разберётся сама.",
         style = Type.Small.copy(color = Palette.Jade),
     )
 
@@ -229,37 +227,31 @@ private fun VideoTab(
     }
 }
 
-/** Вкладка площадки: вход и скачивание из твоей ленты. */
+/** Вкладка шортсов: вход, сбор ленты и просмотр скачанного. */
 @Composable
-private fun PlatformTab(state: UiState, vm: AppViewModel, platform: YtDlp.Platform) {
-    AppButton("Вход в ${platform.title}", tail = "один раз") {
-        vm.setPlatform(platform)
-        vm.openLogin()
-    }
+private fun ShortsTab(state: UiState, vm: AppViewModel) {
+    AppButton("Вход в YouTube", tail = "один раз") { vm.openLogin() }
     Spacer(Modifier.height(10.dp))
     AppButton(
-        "Скачать из ленты",
-        tail = "рекомендации ${platform.title}",
+        "Скачать шортсы",
+        tail = "рекомендации или каналы",
         primary = true,
-    ) {
-        vm.setPlatform(platform)
-        vm.go(Screen.DOWNLOAD)
-    }
-
+    ) { vm.go(Screen.DOWNLOAD) }
     Spacer(Modifier.height(10.dp))
-
-    val saved = state.savedByPlatform[platform.name] ?: (0 to 0L)
     AppButton(
         "Смотреть скачанное",
-        tail = if (saved.first > 0) "${saved.first} · ${formatBytes(saved.second)}" else "пусто",
-        enabled = saved.first > 0,
-    ) { vm.openPlayer(platform) }
+        tail = if (state.savedCount > 0)
+            "${state.savedCount} · ${formatBytes(state.savedBytes)}" else "пусто",
+        enabled = state.savedCount > 0,
+    ) { vm.openPlayer() }
+    Spacer(Modifier.height(10.dp))
+    AppButton("Автосбор из чужой ленты", tail = "любое приложение") { vm.openClicker() }
 
     Spacer(Modifier.height(18.dp))
     Text(
-        "Приложение открывает твою ленту ${platform.title} скрыто, листает её " +
-            "и запоминает ролики. Смотреть их заранее не нужно — они окажутся " +
-            "в плеере. Скачанное здесь отдельное: ролики площадок не смешиваются.",
+        "Приложение открывает твою ленту скрыто, листает её и запоминает " +
+            "ролики. Смотреть их заранее не нужно — они окажутся в плеере. " +
+            "Для рекомендаций нужен вход, «Мои каналы» работают и без него.",
         style = Type.Small,
     )
 }
@@ -289,12 +281,61 @@ fun DownloadScreen(state: UiState, vm: AppViewModel) {
         Panel {
             Text("ЛЕНТА", style = Type.Label)
             Spacer(Modifier.height(10.dp))
+            if (state.feed == YtDlp.Feed.ACCOUNTS) {
+                Spacer(Modifier.height(10.dp))
+                var newAccount by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = newAccount,
+                    onValueChange = { newAccount = it },
+                    label = { Text("Имя канала", style = Type.Label) },
+                    placeholder = { Text("@username", style = Type.Small) },
+                    singleLine = true,
+                    textStyle = Type.Data.copy(fontSize = 12.sp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Palette.Sink,
+                        unfocusedContainerColor = Palette.Sink,
+                        focusedIndicatorColor = Palette.Signal,
+                        unfocusedIndicatorColor = Palette.Edge,
+                        cursorColor = Palette.Signal,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                AppButton("Добавить канал", enabled = newAccount.isNotBlank()) {
+                    vm.addAccount(newAccount)
+                    newAccount = ""
+                }
+                if (state.accounts.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    state.accounts.forEach { name ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 5.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text("@$name", style = Type.Data.copy(fontSize = 12.sp))
+                            Text(
+                                "убрать",
+                                style = Type.Small.copy(color = Palette.Signal),
+                                modifier = Modifier.clickable { vm.removeAccount(name) },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Приложение обходит вкладки /shorts этих каналов и берёт " +
+                        "свежие ролики. Вход не нужен — страницы публичные.",
+                    style = Type.Small,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             if (state.feed == YtDlp.Feed.RECOMMENDED) {
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Приложение пролистает твою ленту столько раз, сколько " +
-                        "роликов заказано, и покажет найденное списком. " +
-                        "Нужен вход в YouTube.",
+                    "Рекомендации требуют входа в YouTube. Приложение пролистает " +
+                        "ленту столько раз, сколько роликов заказано.",
                     style = Type.Small,
                 )
                 Spacer(Modifier.height(4.dp))

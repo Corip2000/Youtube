@@ -108,6 +108,16 @@ object YtDlp {
 
     private fun url(id: String) = "https://www.youtube.com/watch?v=$id"
 
+    /**
+     * Имя автора превращаем в адрес его страницы. Работает без входа:
+     * yt-dlp просто открывает публичную страницу и отдаёт список роликов.
+     */
+    fun accountUrl(name: String): String {
+        val n = name.trim().removePrefix("@")
+        if (n.startsWith("http")) return n.trimEnd('/').removeSuffix("/shorts") + "/shorts"
+        return "https://www.youtube.com/@$n/shorts"
+    }
+
     /** Номер ролика из ссылки — им называем файлы и отсеиваем повторы. */
     fun idFromUrl(link: String): String {
         Regex("""[?&]v=([A-Za-z0-9_-]{11})""").find(link)?.let { return it.groupValues[1] }
@@ -132,54 +142,25 @@ object YtDlp {
 
     // ------------------------------------------------------------------ ленты
 
-    /**
-     * Откуда берём ленту. Скачивание у yt-dlp одинаковое для обеих площадок,
-     * различаются только адреса и вид ссылки на ролик.
-     */
-    enum class Platform(
-        val title: String,
-        val feedUrl: String,
-        val loginUrl: String,
-        val maxSeconds: Int,
-        /**
-         * Каким браузером представляемся. У TikTok мобильная версия
-         * упирается в проверку, которую встроенный браузер не проходит,
-         * и показывает «нет интернета» — поэтому ему по умолчанию
-         * настольный вид. YouTube наоборот удобнее в мобильном.
-         */
-        val desktopByDefault: Boolean,
-    ) {
-        YOUTUBE(
-            "YouTube",
-            "https://m.youtube.com/shorts",
-            "https://accounts.google.com/ServiceLogin?service=youtube",
-            MAX_SHORT_SECONDS,
-            desktopByDefault = false,
-        ),
-        TIKTOK(
-            "TikTok",
-            "https://www.tiktok.com/foryou",
-            "https://www.tiktok.com/login/phone-or-email",
-            600,
-            desktopByDefault = true,
-        ),
-        ;
+    /** Адреса ленты и входа. Осталась одна площадка — YouTube. */
+    object Yt {
+        const val FEED_URL = "https://m.youtube.com/shorts"
+        const val LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube"
+        const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+        const val UA_DESKTOP =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
-        fun userAgent(desktop: Boolean): String = if (desktop) UA_DESKTOP else UA_MOBILE
+        fun userAgent(desktop: Boolean) = if (desktop) UA_DESKTOP else USER_AGENT
     }
-
-    const val UA_MOBILE =
-        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
-
-    const val UA_DESKTOP =
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
         // Рекомендации собираются не через yt-dlp, а из твоей ленты в браузере:
         // списка этой ленты наружу не существует. Здесь она стоит рядом с
         // остальными источниками только чтобы выбираться в одном месте.
+        ACCOUNTS("", "Мои каналы", false),
         RECOMMENDED("", "Мои рекомендации", true),
         CUSTOM("", "Ссылка на канал", false),
     }
@@ -267,6 +248,34 @@ object YtDlp {
         customTarget: String = "",
     ): List<Candidate> =
         withContext(Dispatchers.IO) {
+            // Список авторов обходим по одному и складываем всё вместе.
+            if (feed == Feed.ACCOUNTS) {
+                val names = customTarget.lines().map { it.trim() }.filter { it.isNotEmpty() }
+                require(names.isNotEmpty()) { "Список авторов пуст — добавь хотя бы одного." }
+
+                val out = mutableListOf<Candidate>()
+                val problems = mutableListOf<String>()
+                for (name in names.shuffled()) {
+                    if (out.size >= limit * 2) break
+                    runCatching {
+                        val page = flat(accountUrl(name), cookies, 20)
+                        val items = page.optJSONArray("entries") ?: return@runCatching
+                        for (i in 0 until items.length()) {
+                            val e = items.optJSONObject(i) ?: continue
+                            val c = entryToCandidate(e, true) ?: continue
+                            if (c.id !in exclude && out.none { it.id == c.id }) out.add(c)
+                        }
+                    }.onFailure { problems.add(name) }
+                }
+                if (out.isEmpty()) {
+                    error(
+                        "Ни у кого из списка роликов не нашлось" +
+                            if (problems.isNotEmpty()) ": не открылись ${problems.take(3)}" else "."
+                    )
+                }
+                return@withContext out.shuffled()
+            }
+
             val target = when (feed) {
                 Feed.CUSTOM -> customTarget.trim()
                 else -> feed.target
@@ -531,7 +540,6 @@ object YtDlp {
         maxTop: Int,
         maxReplies: Int,
         requireVertical: Boolean,
-        maxSeconds: Int,
         onProgress: (Float) -> Unit,
     ): Downloaded = withContext(Dispatchers.IO) {
         dir.mkdirs()
@@ -548,8 +556,8 @@ object YtDlp {
             // отбрасывал вообще всё.
             addOption(
                 "--match-filter",
-                if (requireVertical) "duration <= $maxSeconds & height > width"
-                else "duration <= $maxSeconds",
+                if (requireVertical) "duration <= $MAX_SHORT_SECONDS & height > width"
+                else "duration <= $MAX_SHORT_SECONDS",
             )
             if (ffmpegReady) addOption("--merge-output-format", "mp4")
             addOption("--write-info-json")

@@ -100,9 +100,14 @@ fun LinkScreen(state: UiState, vm: AppViewModel) {
                     Text("${(state.linkProgress * 100).toInt()}%", style = Type.Small)
                 } else {
                     AppButton(
+                        "Сохранить в приложение",
+                        tail = "с комментариями",
+                        primary = true,
+                    ) { vm.saveLinkToLibrary() }
+                    Spacer(Modifier.height(10.dp))
+                    AppButton(
                         "Скачать в галерею",
                         tail = formatBytes(info.size),
-                        primary = true,
                     ) { vm.downloadLink() }
                 }
             }
@@ -119,9 +124,17 @@ fun LinkScreen(state: UiState, vm: AppViewModel) {
         }
 
         Spacer(Modifier.height(24.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Комментарии и лайки здесь не сохраняются —", style = Type.Small)
-        }
-        Text("это обычный файл для галереи.", style = Type.Small)
+        Text(
+            "«В приложение» — ролик ляжет во вкладку «Шортсы», с комментариями, " +
+                "и будет играть в плеере. «В галерею» — просто файл, без " +
+                "комментариев и лайков.",
+            style = Type.Small,
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Самый удобный путь: открой ролик в любом приложении, нажми " +
+                "«Поделиться» и выбери ShortsOffline. Ссылка прилетит сюда сама.",
+            style = Type.Small.copy(color = Palette.Jade),
+        )
     }
 }

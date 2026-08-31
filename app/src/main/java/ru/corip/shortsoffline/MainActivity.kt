@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import ru.corip.shortsoffline.ui.DownloadScreen
 import ru.corip.shortsoffline.ui.MenuScreen
 import ru.corip.shortsoffline.ui.Palette
+import ru.corip.shortsoffline.ui.ClickerScreen
 import ru.corip.shortsoffline.ui.LinkScreen
 import ru.corip.shortsoffline.ui.LoginScreen
 import ru.corip.shortsoffline.ui.SoloPlayerScreen
@@ -93,13 +94,11 @@ private fun App(
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
             Screen.LOGIN -> LoginScreen(
-                platform = state.platform,
                 desktop = state.desktopView,
                 onDesktopChange = { vm.setDesktopView(it) },
                 onDone = { vm.go(Screen.MENU) },
             )
             Screen.FEED -> ShortsFeedScreen(
-                platform = state.platform,
                 desktop = state.desktopView,
                 collected = state.collected,
                 target = state.count,
@@ -109,6 +108,7 @@ private fun App(
             )
             Screen.DOWNLOAD -> DownloadScreen(state, vm)
             Screen.LINK -> LinkScreen(state, vm)
+            Screen.CLICKER -> ClickerScreen(state, vm)
             Screen.SOLO -> state.localUri?.let {
                 SoloPlayerScreen(it, onClose = { vm.closeLocal() })
             }

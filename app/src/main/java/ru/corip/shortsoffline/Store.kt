@@ -27,10 +27,8 @@ data class Candidate(
     val likes: Long,
     val commentCount: Long,
     val thumbUrl: String?,
-    /** Полный адрес страницы ролика: у YouTube и TikTok он разный. */
+    /** Полный адрес страницы ролика. */
     val url: String = "",
-    /** Откуда взят ролик: YOUTUBE или TIKTOK. Библиотеки не смешиваются. */
-    val platform: String = "YOUTUBE",
     /** Взят из шортс-ленты — значит это точно вертикальный ролик. */
     val fromShortsFeed: Boolean = false,
     var size: Long = 0,
@@ -48,7 +46,6 @@ data class Saved(
     val likes: Long,
     val commentCount: Long,
     val savedComments: Int,
-    val platform: String,
     val file: String,
     val thumb: String?,
     val meta: String,
@@ -76,33 +73,43 @@ class Store(context: Context) {
 
     // ---------- настройки ----------
 
-    /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
-    /** Сколько комментариев тянуть: 100, 30 или 0 (не тянуть вовсе). */
     /** Быстрый поиск: вес прикидываем по длительности, не опрашивая каждый ролик. */
     var fastSize: Boolean
         get() = prefs.getBoolean("fast_size", true)
         set(v) = prefs.edit().putBoolean("fast_size", v).apply()
 
+    /** Сколько комментариев тянуть: 100, 30 или 0 (не тянуть вовсе). */
     var commentDepth: Int
         get() = prefs.getInt("comment_depth", 30)
         set(v) = prefs.edit().putInt("comment_depth", v).apply()
 
-    /** Выбранная площадка: YOUTUBE или TIKTOK. */
-    /** Вид сайта для площадки: настольный или мобильный. */
-    fun desktopView(platform: String, fallback: Boolean): Boolean =
-        prefs.getBoolean("desktop_$platform", fallback)
+    /** Каналы, чьи шортсы собираем. */
+    var accounts: List<String>
+        get() = (prefs.getString("accounts", "") ?: "")
+            .lines().map { it.trim() }.filter { it.isNotEmpty() }
+        set(v) = prefs.edit().putString("accounts", v.joinToString("\n")).apply()
 
-    fun setDesktopView(platform: String, value: Boolean) =
-        prefs.edit().putBoolean("desktop_$platform", value).apply()
+    /** Вид сайта: настольный или мобильный. */
+    var desktopView: Boolean
+        get() = prefs.getBoolean("desktop_view", false)
+        set(v) = prefs.edit().putBoolean("desktop_view", v).apply()
 
-    var platform: String
-        get() = prefs.getString("platform", "YOUTUBE") ?: "YOUTUBE"
-        set(v) = prefs.edit().putString("platform", v).apply()
+    /** Подписи кнопок для автокликера: правятся под свой язык и мод. */
+    var shareLabels: String
+        get() = prefs.getString("share_labels", "Поделиться, Share, Отправить")
+            ?: "Поделиться, Share, Отправить"
+        set(v) = prefs.edit().putString("share_labels", v).apply()
+
+    var copyLabels: String
+        get() = prefs.getString("copy_labels", "Копировать ссылку, Copy link")
+            ?: "Копировать ссылку, Copy link"
+        set(v) = prefs.edit().putString("copy_labels", v).apply()
 
     var customTarget: String
         get() = prefs.getString("custom_target", "") ?: ""
         set(v) = prefs.edit().putString("custom_target", v.trim()).apply()
 
+    /** Последняя выбранная лента, чтобы не переключать её каждый запуск. */
     var lastFeed: String
         get() = prefs.getString("last_feed", "RECOMMENDED") ?: "RECOMMENDED"
         set(v) = prefs.edit().putString("last_feed", v).apply()
@@ -125,7 +132,6 @@ class Store(context: Context) {
                     likes = o.optLong("likes"),
                     commentCount = o.optLong("commentCount"),
                     savedComments = o.optInt("savedComments"),
-                    platform = o.optString("platform").ifBlank { "YOUTUBE" },
                     file = o.getString("file"),
                     thumb = o.optString("thumb").ifBlank { null },
                     meta = o.getString("meta"),
@@ -144,7 +150,6 @@ class Store(context: Context) {
                 put("id", e.id); put("title", e.title); put("channel", e.channel)
                 put("duration", e.duration); put("views", e.views); put("likes", e.likes)
                 put("commentCount", e.commentCount); put("savedComments", e.savedComments)
-                put("platform", e.platform)
                 put("file", e.file); put("thumb", e.thumb ?: ""); put("meta", e.meta)
                 put("bytes", e.bytes); put("addedAt", e.addedAt)
             })
@@ -154,14 +159,6 @@ class Store(context: Context) {
 
     fun all(): List<Saved> = index.values.sortedBy { it.addedAt }
 
-    /** Скачанное с одной площадки: ленты не перемешиваются. */
-    fun all(platform: String): List<Saved> =
-        index.values.filter { it.platform == platform }.sortedBy { it.addedAt }
-
-    fun count(platform: String): Int = index.values.count { it.platform == platform }
-
-    fun bytes(platform: String): Long =
-        index.values.filter { it.platform == platform }.sumOf { it.bytes }
     fun ids(): Set<String> = index.keys.toSet()
     fun count(): Int = index.size
     fun totalBytes(): Long = index.values.sumOf { it.bytes }
@@ -186,7 +183,6 @@ class Store(context: Context) {
             likes = candidate.likes,
             commentCount = candidate.commentCount,
             savedComments = comments.size,
-            platform = candidate.platform,
             file = videoFile.absolutePath,
             thumb = thumbFile?.absolutePath,
             meta = metaFile.absolutePath,
