@@ -15,8 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -126,40 +124,15 @@ fun ClickerScreen(state: UiState, vm: AppViewModel) {
             Spacer(Modifier.height(6.dp))
             Text(
                 "В TikTok это стрелка без подписи — найти её по слову нельзя. " +
-                    "Если по описанию тоже не находится, приложение тычет по " +
-                    "этому месту. Ползунки в долях экрана: слева направо и " +
-                    "сверху вниз.",
+                    "Если и по описанию не найдётся, приложение ткнёт по этому " +
+                    "месту.",
                 style = Type.Small,
             )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "По ширине: ${(state.shareX * 100).toInt()}%",
-                style = Type.Data.copy(fontSize = 12.sp),
-            )
-            Slider(
-                value = state.shareX,
-                onValueChange = { vm.setSharePoint(it, state.shareY) },
-                valueRange = 0.5f..1f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Palette.Signal,
-                    activeTrackColor = Palette.Signal,
-                    inactiveTrackColor = Palette.PanelHi,
-                ),
-            )
-            Text(
-                "По высоте: ${(state.shareY * 100).toInt()}%",
-                style = Type.Data.copy(fontSize = 12.sp),
-            )
-            Slider(
-                value = state.shareY,
-                onValueChange = { vm.setSharePoint(state.shareX, it) },
-                valueRange = 0.3f..0.9f,
-                colors = SliderDefaults.colors(
-                    thumbColor = Palette.Signal,
-                    activeTrackColor = Palette.Signal,
-                    inactiveTrackColor = Palette.PanelHi,
-                ),
-            )
+            Spacer(Modifier.height(12.dp))
+            AppButton(
+                "Указать на экране",
+                tail = "${(state.shareX * 100).toInt()}% и ${(state.shareY * 100).toInt()}%",
+            ) { vm.openSharePoint() }
         }
 
         Spacer(Modifier.height(20.dp))

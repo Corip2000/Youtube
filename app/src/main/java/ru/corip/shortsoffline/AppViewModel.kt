@@ -17,7 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, PLAYER }
+enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, SHAREPOINT, PLAYER }
 
 /** Вкладки главного экрана. */
 enum class Tab(val title: String) {
@@ -188,6 +188,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         store.copyLabels = v
         _state.update { it.copy(copyLabels = v) }
     }
+
+    fun openSharePoint() = _state.update { it.copy(screen = Screen.SHAREPOINT) }
 
     fun setSharePoint(x: Float, y: Float) {
         store.shareX = x

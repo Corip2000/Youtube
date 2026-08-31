@@ -60,6 +60,9 @@ data class Lifetime(val downloaded: Int, val deleted: Int, val freed: Long)
 
 // ---------------------------------------------------------------- хранилище
 
+/** «Ссылка» — так подписана кнопка в TikTok, она должна идти первой. */
+private const val DEFAULT_COPY_LABELS = "Ссылка, Link, Копировать ссылку, Copy link"
+
 class Store(context: Context) {
 
     private val app = context.applicationContext
@@ -104,8 +107,7 @@ class Store(context: Context) {
         set(v) = prefs.edit().putString("share_labels", v).apply()
 
     var copyLabels: String
-        get() = prefs.getString("copy_labels", "Копировать ссылку, Copy link")
-            ?: "Копировать ссылку, Copy link"
+        get() = prefs.getString("copy_labels", DEFAULT_COPY_LABELS) ?: DEFAULT_COPY_LABELS
         set(v) = prefs.edit().putString("copy_labels", v).apply()
 
     /** Место кнопки «Поделиться» в долях экрана — на случай иконки без подписи. */
