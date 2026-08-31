@@ -29,6 +29,8 @@ data class Candidate(
     val thumbUrl: String?,
     /** Полный адрес страницы ролика. */
     val url: String = "",
+    /** Откуда взят: YOUTUBE или TIKTOK. Определяется по адресу. */
+    val platform: String = "YOUTUBE",
     /** Взят из шортс-ленты — значит это точно вертикальный ролик. */
     val fromShortsFeed: Boolean = false,
     var size: Long = 0,
@@ -46,6 +48,7 @@ data class Saved(
     val likes: Long,
     val commentCount: Long,
     val savedComments: Int,
+    val platform: String,
     val file: String,
     val thumb: String?,
     val meta: String,
@@ -105,6 +108,15 @@ class Store(context: Context) {
             ?: "Копировать ссылку, Copy link"
         set(v) = prefs.edit().putString("copy_labels", v).apply()
 
+    /** Место кнопки «Поделиться» в долях экрана — на случай иконки без подписи. */
+    var shareX: Float
+        get() = prefs.getFloat("share_x", 0.93f)
+        set(v) = prefs.edit().putFloat("share_x", v).apply()
+
+    var shareY: Float
+        get() = prefs.getFloat("share_y", 0.62f)
+        set(v) = prefs.edit().putFloat("share_y", v).apply()
+
     var customTarget: String
         get() = prefs.getString("custom_target", "") ?: ""
         set(v) = prefs.edit().putString("custom_target", v.trim()).apply()
@@ -132,6 +144,7 @@ class Store(context: Context) {
                     likes = o.optLong("likes"),
                     commentCount = o.optLong("commentCount"),
                     savedComments = o.optInt("savedComments"),
+                    platform = o.optString("platform").ifBlank { "YOUTUBE" },
                     file = o.getString("file"),
                     thumb = o.optString("thumb").ifBlank { null },
                     meta = o.getString("meta"),
@@ -150,6 +163,7 @@ class Store(context: Context) {
                 put("id", e.id); put("title", e.title); put("channel", e.channel)
                 put("duration", e.duration); put("views", e.views); put("likes", e.likes)
                 put("commentCount", e.commentCount); put("savedComments", e.savedComments)
+                put("platform", e.platform)
                 put("file", e.file); put("thumb", e.thumb ?: ""); put("meta", e.meta)
                 put("bytes", e.bytes); put("addedAt", e.addedAt)
             })
@@ -158,6 +172,15 @@ class Store(context: Context) {
     }
 
     fun all(): List<Saved> = index.values.sortedBy { it.addedAt }
+
+    /** Скачанное с одного источника: ленты не перемешиваются. */
+    fun all(platform: String): List<Saved> =
+        index.values.filter { it.platform == platform }.sortedBy { it.addedAt }
+
+    fun count(platform: String): Int = index.values.count { it.platform == platform }
+
+    fun bytes(platform: String): Long =
+        index.values.filter { it.platform == platform }.sumOf { it.bytes }
 
     fun ids(): Set<String> = index.keys.toSet()
     fun count(): Int = index.size
@@ -183,6 +206,7 @@ class Store(context: Context) {
             likes = candidate.likes,
             commentCount = candidate.commentCount,
             savedComments = comments.size,
+            platform = candidate.platform,
             file = videoFile.absolutePath,
             thumb = thumbFile?.absolutePath,
             meta = metaFile.absolutePath,

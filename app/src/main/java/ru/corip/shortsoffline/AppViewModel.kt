@@ -22,7 +22,8 @@ enum class Screen { MENU, LOGIN, FEED, DOWNLOAD, LINK, SOLO, CLICKER, PLAYER }
 /** Вкладки главного экрана. */
 enum class Tab(val title: String) {
     VIDEO("Видео"),
-    SHORTS("Шортсы"),
+    SHORTS("YouTube"),
+    TIKTOK("TikTok"),
 }
 enum class JobState { IDLE, SEARCHING, READY, DOWNLOADING, DONE, FAILED }
 
@@ -70,6 +71,9 @@ data class UiState(
     val clickerStatus: String = "Не запущен",
     val clickerRunning: Boolean = false,
     val clickerLinks: Int = 0,
+    val shareX: Float = 0.93f,
+    val shareY: Float = 0.62f,
+    val savedByPlatform: Map<String, Pair<Int, Long>> = emptyMap(),
     val commentDepth: Int = 30,
     val fastSize: Boolean = true,
     val running: Int = 0,
@@ -108,6 +112,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 accounts = store.accounts,
                 shareLabels = store.shareLabels,
                 copyLabels = store.copyLabels,
+                shareX = store.shareX,
+                shareY = store.shareY,
                 desktopView = store.desktopView,
                 commentDepth = store.commentDepth,
                 fastSize = store.fastSize,
@@ -183,12 +189,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(copyLabels = v) }
     }
 
+    fun setSharePoint(x: Float, y: Float) {
+        store.shareX = x
+        store.shareY = y
+        _state.update { it.copy(shareX = x, shareY = y) }
+    }
+
     /** Запуск сбора. Дальше нужно переключиться в приложение с лентой. */
     fun startClicker() {
         ClickerService.shareLabels = _state.value.shareLabels.split(",").map { it.trim() }
             .filter { it.isNotEmpty() }
         ClickerService.copyLabels = _state.value.copyLabels.split(",").map { it.trim() }
             .filter { it.isNotEmpty() }
+        ClickerService.shareX = _state.value.shareX
+        ClickerService.shareY = _state.value.shareY
         val count = _state.value.count.takeIf { it > 0 } ?: 50
         ClickerService.start(count)
         watchClicker()
@@ -260,6 +274,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 views = 0, likes = 0, commentCount = 0,
                 thumbUrl = null,
                 url = url,
+                platform = platformOf(url),
                 fromShortsFeed = true,
             ).also { it.size = info.size }
 
@@ -340,6 +355,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(screen = Screen.FEED, collected = emptyList())
     }
 
+    /** Источник по адресу — чтобы ролик лёг в свою вкладку. */
+    private fun platformOf(link: String) =
+        if (link.contains("tiktok.com", ignoreCase = true)) "TIKTOK" else "YOUTUBE"
+
     /** Из ленты приходят полные ссылки на ролики. */
     fun collectShort(link: String) = _state.update {
         if (link in it.collected) it else it.copy(collected = it.collected + link)
@@ -366,7 +385,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Candidate(
                 id = YtDlp.idFromUrl(link), title = "Видео", channel = "", duration = 0,
                 views = 0, likes = 0, commentCount = 0, thumbUrl = null,
-                url = link, fromShortsFeed = true,
+                url = link, platform = platformOf(link), fromShortsFeed = true,
             ).also { it.size = YtDlp.estimateSize(30) }
         }
         _state.update {
@@ -428,6 +447,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(
             savedCount = store.count(),
             savedBytes = store.totalBytes(),
+            savedByPlatform = mapOf(
+                "YOUTUBE" to (store.count("YOUTUBE") to store.bytes("YOUTUBE")),
+                "TIKTOK" to (store.count("TIKTOK") to store.bytes("TIKTOK")),
+            ),
             freeSpace = store.freeSpace(),
             lifetime = store.lifetime(),
         )
@@ -685,12 +708,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------ плеер
 
-    /** Открывает плеер со всем скачанным. */
-    fun openPlayer() {
+    /** [platform] = null означает всё скачанное, иначе только один источник. */
+    fun openPlayer(platform: String? = null) {
         _state.update {
             it.copy(
                 screen = Screen.PLAYER,
-                queue = store.all(),
+                queue = if (platform == null) store.all() else store.all(platform),
                 index = 0,
                 sessionDeleted = 0, sessionFreed = 0,
                 commentsOpen = false, comments = emptyList(),

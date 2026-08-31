@@ -91,6 +91,7 @@ fun MenuScreen(state: UiState, vm: AppViewModel) {
         when (state.tab) {
             Tab.VIDEO -> VideoTab(state, vm, picker) { confirmClear = true }
             Tab.SHORTS -> ShortsTab(state, vm)
+            Tab.TIKTOK -> TikTokTab(state, vm)
         }
     }
 
@@ -238,20 +239,42 @@ private fun ShortsTab(state: UiState, vm: AppViewModel) {
         primary = true,
     ) { vm.go(Screen.DOWNLOAD) }
     Spacer(Modifier.height(10.dp))
+    val yt = state.savedByPlatform["YOUTUBE"] ?: (0 to 0L)
     AppButton(
         "Смотреть скачанное",
-        tail = if (state.savedCount > 0)
-            "${state.savedCount} · ${formatBytes(state.savedBytes)}" else "пусто",
-        enabled = state.savedCount > 0,
-    ) { vm.openPlayer() }
-    Spacer(Modifier.height(10.dp))
-    AppButton("Автосбор из чужой ленты", tail = "любое приложение") { vm.openClicker() }
+        tail = if (yt.first > 0) "${yt.first} · ${formatBytes(yt.second)}" else "пусто",
+        enabled = yt.first > 0,
+    ) { vm.openPlayer("YOUTUBE") }
 
     Spacer(Modifier.height(18.dp))
     Text(
         "Приложение открывает твою ленту скрыто, листает её и запоминает " +
             "ролики. Смотреть их заранее не нужно — они окажутся в плеере. " +
             "Для рекомендаций нужен вход, «Мои каналы» работают и без него.",
+        style = Type.Small,
+    )
+}
+
+/** Вкладка TikTok: ленту собирает автокликер, смотрим отдельно от шортсов. */
+@Composable
+private fun TikTokTab(state: UiState, vm: AppViewModel) {
+    AppButton("Автосбор ленты", tail = "нажимает за тебя", primary = true) {
+        vm.openClicker()
+    }
+    Spacer(Modifier.height(10.dp))
+
+    val tt = state.savedByPlatform["TIKTOK"] ?: (0 to 0L)
+    AppButton(
+        "Смотреть скачанное",
+        tail = if (tt.first > 0) "${tt.first} · ${formatBytes(tt.second)}" else "пусто",
+        enabled = tt.first > 0,
+    ) { vm.openPlayer("TIKTOK") }
+
+    Spacer(Modifier.height(18.dp))
+    Text(
+        "Читать чужую ленту напрямую система не даёт, поэтому приложение " +
+            "повторяет за тобой касания: жмёт «Поделиться», копирует ссылку " +
+            "и листает дальше. Скачанное отсюда не смешивается с шортсами.",
         style = Type.Small,
     )
 }

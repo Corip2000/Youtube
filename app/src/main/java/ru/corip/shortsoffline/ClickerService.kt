@@ -37,7 +37,16 @@ class ClickerService : AccessibilityService() {
 
         /** Подписи кнопок: правятся в приложении под свой язык и мод. */
         @Volatile var shareLabels: List<String> = listOf("Поделиться", "Share", "Отправить")
-        @Volatile var copyLabels: List<String> = listOf("Копировать ссылку", "Copy link", "Скопировать ссылку")
+        @Volatile var copyLabels: List<String> =
+            listOf("Ссылка", "Link", "Копировать ссылку", "Copy link")
+
+        /**
+         * Куда ткнуть, если «Поделиться» — иконка без подписи и найти её
+         * по тексту нельзя. Доли от ширины и высоты экрана: стрелка обычно
+         * у правого края, чуть ниже середины.
+         */
+        @Volatile var shareX: Float = 0.93f
+        @Volatile var shareY: Float = 0.62f
 
         fun start(count: Int) {
             target = count
@@ -92,25 +101,26 @@ class ClickerService : AccessibilityService() {
             val before = links.size
             status = "Собрано ${links.size} из $target"
 
-            if (!tapByLabels(shareLabels)) {
-                idle++
-                sleep(1200)
-                continue
-            }
-            sleep(1200)
+            // Сначала пробуем найти кнопку осмысленно, и только потом — вслепую
+            // по месту: у TikTok «Поделиться» это стрелка без подписи.
+            if (!tapByLabels(shareLabels)) tapAt(shareX, shareY)
+            sleep(1400)
 
             if (!tapByLabels(copyLabels)) {
-                // Панель открылась, но нужной кнопки нет — закрываем и листаем.
+                // Панель не открылась или кнопки нет — закрываем и листаем дальше.
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 idle++
                 sleep(800)
                 swipeUp()
-                sleep(1500)
+                sleep(1600)
                 continue
             }
-            sleep(1200)
+            sleep(1400)
 
             readClipboard()?.let { links.add(it) }
+            // Панель могла остаться открытой — закрываем, иначе свайп уйдёт в неё.
+            performGlobalAction(GLOBAL_ACTION_BACK)
+            sleep(500)
             if (links.size == before) idle++ else idle = 0
 
             swipeUp()
@@ -128,16 +138,45 @@ class ClickerService : AccessibilityService() {
 
     // ------------------------------------------------------------ действия
 
-    /** Ищет кнопку по подписи и нажимает — включая случай, когда нажимается родитель. */
+    /**
+     * Ищет кнопку по подписи. Проверяем и текст, и описание для незрячих:
+     * у иконок без надписи осмысленным бывает только описание.
+     */
     private fun tapByLabels(labels: List<String>): Boolean {
         val root = rootInActiveWindow ?: return false
         for (label in labels) {
-            val found = root.findAccessibilityNodeInfosByText(label) ?: continue
-            for (node in found) {
+            root.findAccessibilityNodeInfosByText(label)?.forEach { node ->
                 if (clickNodeOrParent(node)) return true
             }
         }
+        return tapByDescription(root, labels)
+    }
+
+    /** Обход дерева в поисках описания: иконки подписаны только им. */
+    private fun tapByDescription(root: AccessibilityNodeInfo, labels: List<String>): Boolean {
+        val queue = ArrayDeque(listOf(root))
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 600) {
+            val node = queue.removeFirst()
+            seen++
+            val text = (node.contentDescription?.toString() ?: "")
+            if (text.isNotBlank() && labels.any { text.contains(it, ignoreCase = true) }) {
+                if (clickNodeOrParent(node)) return true
+            }
+            for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
+        }
         return false
+    }
+
+    /** Тычок вслепую по месту на экране — когда кнопку не опознать никак. */
+    private fun tapAt(fx: Float, fy: Float) {
+        val metrics = resources.displayMetrics
+        val path = Path().apply {
+            moveTo(metrics.widthPixels * fx, metrics.heightPixels * fy)
+            lineTo(metrics.widthPixels * fx, metrics.heightPixels * fy)
+        }
+        val stroke = GestureDescription.StrokeDescription(path, 0, 60)
+        dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
     private fun clickNodeOrParent(node: AccessibilityNodeInfo?): Boolean {
