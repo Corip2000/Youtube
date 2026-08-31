@@ -92,9 +92,15 @@ private fun App(
     ) {
         when (state.screen) {
             Screen.MENU -> MenuScreen(state, vm)
-            Screen.LOGIN -> LoginScreen(state.platform, onDone = { vm.go(Screen.MENU) })
+            Screen.LOGIN -> LoginScreen(
+                platform = state.platform,
+                desktop = state.desktopView,
+                onDesktopChange = { vm.setDesktopView(it) },
+                onDone = { vm.go(Screen.MENU) },
+            )
             Screen.FEED -> ShortsFeedScreen(
                 platform = state.platform,
+                desktop = state.desktopView,
                 collected = state.collected,
                 target = state.count,
                 onCollect = { vm.collectShort(it) },

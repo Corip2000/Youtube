@@ -42,6 +42,7 @@ data class UiState(
 
     val tab: Tab = Tab.VIDEO,
     val platform: YtDlp.Platform = YtDlp.Platform.YOUTUBE,
+    val desktopView: Boolean = false,
     val feed: YtDlp.Feed = YtDlp.Feed.RECOMMENDED,
     val count: Int = 10,
     val jobState: JobState = JobState.IDLE,
@@ -95,12 +96,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         val saved = runCatching { YtDlp.Feed.valueOf(store.lastFeed) }.getOrDefault(YtDlp.Feed.RECOMMENDED)
+        val startPlatform = runCatching { YtDlp.Platform.valueOf(store.platform) }
+            .getOrDefault(YtDlp.Platform.YOUTUBE)
         _state.update {
             it.copy(
                 feed = saved,
                 customUrl = store.customTarget,
-                platform = runCatching { YtDlp.Platform.valueOf(store.platform) }
-                    .getOrDefault(YtDlp.Platform.YOUTUBE),
+                platform = startPlatform,
+                desktopView = store.desktopView(
+                    startPlatform.name, startPlatform.desktopByDefault
+                ),
                 commentDepth = store.commentDepth,
                 fastSize = store.fastSize,
             )
@@ -126,7 +131,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setPlatform(value: YtDlp.Platform) {
         store.platform = value.name
-        _state.update { it.copy(platform = value) }
+        _state.update {
+            it.copy(
+                platform = value,
+                desktopView = store.desktopView(value.name, value.desktopByDefault),
+            )
+        }
+    }
+
+    /** Переключение вида сайта запоминается для этой площадки. */
+    fun setDesktopView(value: Boolean) {
+        val platform = _state.value.platform
+        store.setDesktopView(platform.name, value)
+        _state.update { it.copy(desktopView = value) }
     }
 
     fun openLogin() = _state.update { it.copy(screen = Screen.LOGIN) }

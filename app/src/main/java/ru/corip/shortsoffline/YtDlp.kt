@@ -142,29 +142,39 @@ object YtDlp {
         val loginUrl: String,
         val maxSeconds: Int,
         /**
-         * Каким браузером представляемся. TikTok на мобильную строку отдаёт
-         * урезанную страницу, которая толком не грузится, — ему нужен
+         * Каким браузером представляемся. У TikTok мобильная версия
+         * упирается в проверку, которую встроенный браузер не проходит,
+         * и показывает «нет интернета» — поэтому ему по умолчанию
          * настольный вид. YouTube наоборот удобнее в мобильном.
          */
-        val userAgent: String,
+        val desktopByDefault: Boolean,
     ) {
         YOUTUBE(
             "YouTube",
             "https://m.youtube.com/shorts",
             "https://accounts.google.com/ServiceLogin?service=youtube",
             MAX_SHORT_SECONDS,
-            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+            desktopByDefault = false,
         ),
         TIKTOK(
             "TikTok",
             "https://www.tiktok.com/foryou",
             "https://www.tiktok.com/login/phone-or-email",
             600,
-            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
+            desktopByDefault = true,
         ),
+        ;
+
+        fun userAgent(desktop: Boolean): String = if (desktop) UA_DESKTOP else UA_MOBILE
     }
+
+    const val UA_MOBILE =
+        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+
+    const val UA_DESKTOP =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+            "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 
     enum class Feed(val target: String, val title: String, val needsLogin: Boolean) {
         // Рекомендации собираются не через yt-dlp, а из твоей ленты в браузере:

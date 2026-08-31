@@ -46,16 +46,16 @@ import ru.corip.shortsoffline.YtDlp
  *    По умолчанию берём мобильную, но вид можно переключить — какая-то
  *    из двух обычно открывается.
  */
-private const val DESKTOP_UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun LoginScreen(platform: YtDlp.Platform, onDone: () -> Unit) {
+fun LoginScreen(
+    platform: YtDlp.Platform,
+    desktop: Boolean,
+    onDesktopChange: (Boolean) -> Unit,
+    onDone: () -> Unit,
+) {
     var root by remember { mutableStateOf<FrameLayout?>(null) }
     var main by remember { mutableStateOf<WebView?>(null) }
-    var desktop by remember { mutableStateOf(false) }
     var progress by remember { mutableIntStateOf(0) }
 
     DisposableEffect(Unit) { onDispose { root?.removeAllViews(); main?.destroy() } }
@@ -104,9 +104,9 @@ fun LoginScreen(platform: YtDlp.Platform, onDone: () -> Unit) {
                 if (desktop) "Вид: компьютер" else "Вид: телефон",
                 Modifier.weight(1f),
             ) {
-                desktop = !desktop
-                main?.settings?.userAgentString =
-                    if (desktop) DESKTOP_UA else platform.userAgent
+                val next = !desktop
+                onDesktopChange(next)
+                main?.settings?.userAgentString = platform.userAgent(next)
                 main?.loadUrl(platform.loginUrl)
             }
         }
@@ -132,7 +132,7 @@ fun LoginScreen(platform: YtDlp.Platform, onDone: () -> Unit) {
                     settings.loadWithOverviewMode = true
                     settings.setSupportMultipleWindows(true)
                     settings.javaScriptCanOpenWindowsAutomatically = true
-                    settings.userAgentString = platform.userAgent
+                    settings.userAgentString = platform.userAgent(desktop)
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT,

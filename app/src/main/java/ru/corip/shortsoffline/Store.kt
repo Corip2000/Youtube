@@ -85,6 +85,13 @@ class Store(context: Context) {
         set(v) = prefs.edit().putInt("comment_depth", v).apply()
 
     /** Выбранная площадка: YOUTUBE или TIKTOK. */
+    /** Вид сайта для площадки: настольный или мобильный. */
+    fun desktopView(platform: String, fallback: Boolean): Boolean =
+        prefs.getBoolean("desktop_$platform", fallback)
+
+    fun setDesktopView(platform: String, value: Boolean) =
+        prefs.edit().putBoolean("desktop_$platform", value).apply()
+
     var platform: String
         get() = prefs.getString("platform", "YOUTUBE") ?: "YOUTUBE"
         set(v) = prefs.edit().putString("platform", v).apply()

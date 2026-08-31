@@ -162,6 +162,7 @@ private fun WebView.swipeUp() {
 @Composable
 fun ShortsFeedScreen(
     platform: YtDlp.Platform,
+    desktop: Boolean,
     collected: List<String>,
     target: Int,
     onCollect: (String) -> Unit,
@@ -226,7 +227,8 @@ fun ShortsFeedScreen(
             // они подсовывали другую подборку вместо твоей.
             // Пробуем оба способа: свайп для мобильной вёрстки, стрелка для настольной.
             view.swipeUp()
-            if (platform == YtDlp.Platform.TIKTOK) view.evaluateJavascript(JS_ARROW_DOWN, null)
+            // На настольной вёрстке лента слушается стрелки, на мобильной — свайпа.
+            if (desktop) view.evaluateJavascript(JS_ARROW_DOWN, null)
             delay(1400)
         }
         done = true
@@ -303,7 +305,7 @@ fun ShortsFeedScreen(
                         settings.databaseEnabled = true
                         settings.useWideViewPort = true
                         settings.loadWithOverviewMode = true
-                        settings.userAgentString = platform.userAgent
+                        settings.userAgentString = platform.userAgent(desktop)
                         webViewClient = object : WebViewClient() {
                         override fun onReceivedError(
                             view: WebView?,
