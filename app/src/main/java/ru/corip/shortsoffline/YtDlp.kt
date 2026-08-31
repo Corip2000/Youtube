@@ -141,18 +141,28 @@ object YtDlp {
         val feedUrl: String,
         val loginUrl: String,
         val maxSeconds: Int,
+        /**
+         * Каким браузером представляемся. TikTok на мобильную строку отдаёт
+         * урезанную страницу, которая толком не грузится, — ему нужен
+         * настольный вид. YouTube наоборот удобнее в мобильном.
+         */
+        val userAgent: String,
     ) {
         YOUTUBE(
             "YouTube",
             "https://m.youtube.com/shorts",
             "https://accounts.google.com/ServiceLogin?service=youtube",
             MAX_SHORT_SECONDS,
+            "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36",
         ),
         TIKTOK(
             "TikTok",
             "https://www.tiktok.com/foryou",
             "https://www.tiktok.com/login",
             600,
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         ),
     }
 

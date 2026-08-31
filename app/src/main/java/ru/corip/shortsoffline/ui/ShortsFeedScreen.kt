@@ -80,15 +80,34 @@ private const val JS_EXTRACT_TT = """
 (function(){
   var found = [], seen = {};
   var html = document.documentElement.innerHTML;
-  var re = /\/@([A-Za-z0-9_.\-]{1,30})\/video\/(\d{15,21})/g;
+  // Основной вид ссылки — с именем автора. Если разметка другая, ловим
+  // просто номер ролика: у TikTok он работает и с любым автором в адресе.
+  var withAuthor = /\/@([A-Za-z0-9_.\-]{1,30})\/video\/(\d{15,21})/g;
   var m;
-  while ((m = re.exec(html)) !== null) {
+  while ((m = withAuthor.exec(html)) !== null) {
     if (!seen[m[2]]) {
       seen[m[2]] = 1;
       found.push("https://www.tiktok.com/@" + m[1] + "/video/" + m[2]);
     }
   }
+  var bare = /"(?:id|itemId|awemeId)":"(\d{18,21})"/g;
+  while ((m = bare.exec(html)) !== null) {
+    if (!seen[m[1]]) {
+      seen[m[1]] = 1;
+      found.push("https://www.tiktok.com/@i/video/" + m[1]);
+    }
+  }
   return found.join(" ");
+})()
+"""
+
+/** На настольной версии TikTok лента листается стрелкой вниз. */
+private const val JS_ARROW_DOWN = """
+(function(){
+  var e = new KeyboardEvent('keydown', {key:'ArrowDown', keyCode:40, which:40, bubbles:true});
+  document.dispatchEvent(e);
+  document.body.dispatchEvent(e);
+  return 'ok';
 })()
 """
 
@@ -139,12 +158,6 @@ private fun WebView.swipeUp() {
 
 
 
-// Обычный мобильный Chrome: встроенный браузер по умолчанию помечает себя
-// как «wv», и по этой метке Google отказывает во входе.
-const val UA =
-    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
-
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun ShortsFeedScreen(
@@ -159,6 +172,7 @@ fun ShortsFeedScreen(
     var loggedIn by remember { mutableStateOf<Boolean?>(null) }
     var status by remember { mutableStateOf("Открываю ленту…") }
     var done by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     var found by remember { mutableStateOf(0) }
     // Лента работает скрыто: смотреть ролики заранее не нужно.
     val showBrowser = false
@@ -210,7 +224,9 @@ fun ShortsFeedScreen(
 
             // Листаем ту самую ленту, что на экране. Никаких перезагрузок:
             // они подсовывали другую подборку вместо твоей.
+            // Пробуем оба способа: свайп для мобильной вёрстки, стрелка для настольной.
             view.swipeUp()
+            if (platform == YtDlp.Platform.TIKTOK) view.evaluateJavascript(JS_ARROW_DOWN, null)
             delay(1400)
         }
         done = true
@@ -285,8 +301,20 @@ fun ShortsFeedScreen(
                         settings.javaScriptEnabled = true
                         settings.domStorageEnabled = true
                         settings.databaseEnabled = true
-                        settings.userAgentString = UA
-                        webViewClient = WebViewClient()
+                        settings.userAgentString = platform.userAgent
+                        webViewClient = object : WebViewClient() {
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                            error: android.webkit.WebResourceError?,
+                        ) {
+                            // Только для главной страницы: мелкие сбои картинок не важны.
+                            if (request?.isForMainFrame == true) {
+                                loadError = "Страница не открылась. Проверь VPN и сеть."
+                            }
+                            super.onReceivedError(view, request, error)
+                        }
+                    }
                         webChromeClient = WebChromeClient()
                         loadUrl(platform.feedUrl)
                         web = this
@@ -317,11 +345,12 @@ fun ShortsFeedScreen(
                     )
                     Spacer(Modifier.height(20.dp))
                     Text(
-                        if (loggedIn == false)
+                        loadError ?: if (loggedIn == false)
                             "${platform.title} не узнаёт тебя. Вернись и войди в аккаунт."
                         else "Листаю твою ленту и запоминаю ролики. Смотреть их сейчас не нужно.",
                         style = Type.Small.copy(
-                            color = if (loggedIn == false) Palette.Signal else Palette.Muted
+                            color = if (loggedIn == false || loadError != null) Palette.Signal
+                            else Palette.Muted
                         ),
                     )
                 }

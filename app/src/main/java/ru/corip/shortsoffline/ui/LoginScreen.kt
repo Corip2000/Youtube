@@ -81,7 +81,7 @@ fun LoginScreen(platform: YtDlp.Platform, onDone: () -> Unit) {
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.databaseEnabled = true
-                    settings.userAgentString = UA
+                    settings.userAgentString = platform.userAgent
                     webViewClient = WebViewClient()
                     webChromeClient = WebChromeClient()
                     loadUrl(platform.loginUrl)
