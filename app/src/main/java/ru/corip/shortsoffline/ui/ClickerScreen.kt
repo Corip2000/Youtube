@@ -99,14 +99,18 @@ fun ClickerScreen(state: UiState, vm: AppViewModel) {
                 Text("ПОДПИСИ КНОПОК", style = Type.Label)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Кнопки ищутся по надписи и по описанию — так переживается " +
-                        "смена разметки. Если названы иначе, впиши через запятую.",
+                    "Кнопки ищутся по надписи и по описанию. Ролик пересылается " +
+                        "прямо в приложение: копирование в буфер не работает, " +
+                        "Android не даёт читать его в фоне. Если приложение " +
+                        "подписано иначе — впиши название через запятую.",
                     style = Type.Small,
                 )
                 Spacer(Modifier.height(12.dp))
                 LabelField(state.shareLabels, "Кнопка «Поделиться»") { vm.setShareLabels(it) }
                 Spacer(Modifier.height(10.dp))
-                LabelField(state.copyLabels, "Кнопка «Ссылка»") { vm.setCopyLabels(it) }
+                LabelField(state.appLabels, "Название приложения в списке") {
+                    vm.setAppLabels(it)
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -114,7 +118,7 @@ fun ClickerScreen(state: UiState, vm: AppViewModel) {
             Step(2, "Поставь перекрестие на стрелку «Поделиться» в TikTok.")
             Step(3, "Открой «Запуск», задай количество и нажми «Начать сбор».")
             Step(4, "За пять секунд переключись в TikTok и открой ленту.")
-            Step(5, "Дальше телефон работает сам. Звук выключается на время сбора.")
+            Step(5, "Дальше телефон работает сам: жмёт «Поделиться», находит ShortsOffline в списке и пересылает ролик. Звук выключается.")
 
             Spacer(Modifier.height(12.dp))
             Text(

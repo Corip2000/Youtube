@@ -68,6 +68,7 @@ data class UiState(
     // автокликер
     val shareLabels: String = "",
     val copyLabels: String = "",
+    val appLabels: String = "",
     val clickerStatus: String = "Не запущен",
     val clickerRunning: Boolean = false,
     val clickerLinks: Int = 0,
@@ -113,6 +114,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 accounts = store.accounts,
                 shareLabels = store.shareLabels,
                 copyLabels = store.copyLabels,
+                appLabels = store.appLabels,
                 shareX = store.shareX,
                 shareY = store.shareY,
                 desktopView = store.desktopView,
@@ -192,6 +194,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Показывает перекрестие поверх других приложений и уходит с экрана. */
     fun pickSharePointOnScreen() {
+        ClickerService.appLabels = _state.value.appLabels.split(",").map { it.trim() }
+            .filter { it.isNotEmpty() }
         ClickerService.shareX = _state.value.shareX
         ClickerService.shareY = _state.value.shareY
         ClickerService.showPicker()
@@ -205,6 +209,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         it.copy(shareX = store.shareX, shareY = store.shareY)
     }
 
+    fun setAppLabels(v: String) {
+        store.appLabels = v
+        _state.update { it.copy(appLabels = v) }
+    }
+
     fun setSharePoint(x: Float, y: Float) {
         store.shareX = x
         store.shareY = y
@@ -216,6 +225,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ClickerService.shareLabels = _state.value.shareLabels.split(",").map { it.trim() }
             .filter { it.isNotEmpty() }
         ClickerService.copyLabels = _state.value.copyLabels.split(",").map { it.trim() }
+            .filter { it.isNotEmpty() }
+        ClickerService.appLabels = _state.value.appLabels.split(",").map { it.trim() }
             .filter { it.isNotEmpty() }
         ClickerService.shareX = _state.value.shareX
         ClickerService.shareY = _state.value.shareY

@@ -2,7 +2,6 @@ package ru.corip.shortsoffline
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Context.MODE_PRIVATE
 import android.graphics.Color
@@ -57,6 +56,13 @@ class ClickerService : AccessibilityService() {
         @Volatile var shareLabels: List<String> = listOf("Поделиться", "Share", "Отправить")
         @Volatile var copyLabels: List<String> =
             listOf("Ссылка", "Link", "Копировать ссылку", "Copy link")
+
+        /** Как подписано наше приложение в панели «Поделиться». */
+        @Volatile var appLabels: List<String> = listOf("ShortsOffline", "Shorts")
+
+        /** Кнопки раскрытия полного списка приложений. */
+        @Volatile var moreLabels: List<String> =
+            listOf("Ещё", "Еще", "More", "Показать всё", "Показать все")
 
         /**
          * Куда ткнуть, если «Поделиться» — иконка без подписи и найти её
@@ -316,8 +322,10 @@ class ClickerService : AccessibilityService() {
             if (!tapByLabels(shareLabels)) tapAt(shareX, shareY)
             sleep(1400)
 
-            if (!tapByLabels(copyLabels)) {
-                // Панель не открылась или кнопки нет — закрываем и листаем дальше.
+            // Пересылаем ролик прямо в приложение. Копирование в буфер
+            // не годится: с Android 10 его читает только то приложение,
+            // что сейчас на переднем плане.
+            if (!tapOurApp()) {
                 performGlobalAction(GLOBAL_ACTION_BACK)
                 idle++
                 sleep(800)
@@ -325,12 +333,10 @@ class ClickerService : AccessibilityService() {
                 sleep(1600)
                 continue
             }
-            sleep(1400)
+            sleep(1600)
 
-            // Один и тот же адрес означает, что копирование не сработало,
-            // но это не повод останавливаться.
-            val link = readClipboard()
-            if (link == null || !links.add(link)) copyFailures++ else copyFailures = 0
+            // Ссылку добавляет невидимый приёмник, когда система её доставит.
+            if (links.size == before) copyFailures++ else copyFailures = 0
             // Панель могла остаться открытой — закрываем, иначе свайп уйдёт в неё.
             performGlobalAction(GLOBAL_ACTION_BACK)
             sleep(500)
@@ -346,7 +352,7 @@ class ClickerService : AccessibilityService() {
         endRun(
             when {
                 target > 0 && links.size >= target -> "Готово"
-                copyFailures >= 8 -> "Буфер обмена недоступен — ссылки не читаются"
+                copyFailures >= 8 -> "Ссылки не доходят — проверь подпись приложения"
                 idle >= 15 -> "Кнопки не находятся — проверь подписи и перекрестие"
                 else -> "Завершено"
             }
@@ -380,6 +386,37 @@ class ClickerService : AccessibilityService() {
             if (text.isNotBlank() && labels.any { text.contains(it, ignoreCase = true) }) {
                 if (clickNodeOrParent(node)) return true
             }
+            for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
+        }
+        return false
+    }
+
+    /**
+     * Ищет ShortsOffline в панели «Поделиться» и нажимает.
+     * Приложение редко оказывается в первом ряду, поэтому панель при
+     * необходимости раскрывается и прокручивается.
+     */
+    private fun tapOurApp(): Boolean {
+        repeat(5) {
+            if (tapByLabels(appLabels)) return true
+            val root = rootInActiveWindow ?: return false
+            // Сначала пробуем раскрыть полный список, потом просто листать.
+            if (!tapByLabels(moreLabels) && !scrollForward(root)) return false
+            sleep(800)
+        }
+        return false
+    }
+
+    /** Прокручивает первый попавшийся прокручиваемый список. */
+    private fun scrollForward(root: AccessibilityNodeInfo): Boolean {
+        val queue = ArrayDeque(listOf(root))
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 400) {
+            val node = queue.removeFirst()
+            seen++
+            if (node.isScrollable &&
+                node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            ) return true
             for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
         }
         return false
@@ -420,13 +457,6 @@ class ClickerService : AccessibilityService() {
         dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
     }
 
-    private fun readClipboard(): String? {
-        val manager = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
-        val text = runCatching {
-            manager.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
-        }.getOrNull() ?: return null
-        return Regex("""https?://\S+""").find(text)?.value
-    }
 
     /** Звук на время прогона выключаем: слушать полсотни роликов незачем. */
     private fun mute(on: Boolean) {

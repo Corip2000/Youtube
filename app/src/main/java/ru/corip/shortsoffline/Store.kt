@@ -119,6 +119,11 @@ class Store(context: Context) {
         get() = prefs.getFloat("share_y", 0.62f)
         set(v) = prefs.edit().putFloat("share_y", v).apply()
 
+    /** Как подписано наше приложение в панели «Поделиться». */
+    var appLabels: String
+        get() = prefs.getString("app_labels", "ShortsOffline, Shorts") ?: "ShortsOffline, Shorts"
+        set(v) = prefs.edit().putString("app_labels", v).apply()
+
     var customTarget: String
         get() = prefs.getString("custom_target", "") ?: ""
         set(v) = prefs.edit().putString("custom_target", v.trim()).apply()

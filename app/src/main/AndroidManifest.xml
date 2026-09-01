@@ -27,17 +27,33 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
-            <!--
-              Приём ссылок из других приложений. В TikTok, YouTube, VK и Rutube
-              жмёшь «Поделиться» и выбираешь ShortsOffline — ссылка прилетает
-              сюда. Заглянуть внутрь чужого приложения система не позволяет,
-              а вот принять от него ссылку — обычный и надёжный путь.
-            -->
+        </activity>
+
+        <!--
+          Приёмник ссылок без окна. Во время автосбора служба пересылает
+          сюда ролик за роликом, и показывать при этом экран нельзя —
+          он выкинет тебя из ленты. Поэтому окна нет.
+        -->
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+
+            <!-- Чтобы приложение попадало в верхний ряд списка «Поделиться». -->
+            <meta-data
+                android:name="android.service.chooser.chooser_target_service"
+                android:value="androidx.sharetarget.ChooserTargetServiceCompat" />
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/share_targets" />
         </activity>
 
         <!--
