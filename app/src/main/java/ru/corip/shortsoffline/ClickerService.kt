@@ -397,29 +397,49 @@ class ClickerService : AccessibilityService() {
      * необходимости раскрывается и прокручивается.
      */
     private fun tapOurApp(): Boolean {
-        repeat(5) {
+        var expanded = false
+        // Десять подходов: панель перестраивается не мгновенно, а неудача
+        // на одном шаге не значит, что приложения в списке нет.
+        repeat(10) {
             if (tapByLabels(appLabels)) return true
-            val root = rootInActiveWindow ?: return false
-            // Сначала пробуем раскрыть полный список, потом просто листать.
-            if (!tapByLabels(moreLabels) && !scrollForward(root)) return false
+
+            val root = rootInActiveWindow
+            if (root == null) {
+                sleep(700)
+                return@repeat
+            }
+
+            // «Ещё» жмём только один раз: дальше она исчезает, и повторные
+            // попытки её найти лишь съедали подходы.
+            if (!expanded && tapByLabels(moreLabels)) {
+                expanded = true
+                sleep(1400)
+                return@repeat
+            }
+
+            scrollAll(root)
             sleep(800)
         }
         return false
     }
 
-    /** Прокручивает первый попавшийся прокручиваемый список. */
-    private fun scrollForward(root: AccessibilityNodeInfo): Boolean {
+    /**
+     * Прокручивает все списки на экране, а не первый попавшийся: в панели
+     * «Поделиться» их несколько, и нужный редко оказывается первым.
+     */
+    private fun scrollAll(root: AccessibilityNodeInfo): Boolean {
         val queue = ArrayDeque(listOf(root))
         var seen = 0
-        while (queue.isNotEmpty() && seen < 400) {
+        var scrolled = false
+        while (queue.isNotEmpty() && seen < 500) {
             val node = queue.removeFirst()
             seen++
             if (node.isScrollable &&
                 node.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-            ) return true
+            ) scrolled = true
             for (i in 0 until node.childCount) node.getChild(i)?.let(queue::add)
         }
-        return false
+        return scrolled
     }
 
     /** Тычок вслепую по месту на экране — когда кнопку не опознать никак. */
